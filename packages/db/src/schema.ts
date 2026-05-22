@@ -15,6 +15,7 @@ import {
 } from 'drizzle-orm/pg-core';
 
 import {
+  AssessmentFlagType,
   ContestScoringMode,
   Difficulty,
   Language,
@@ -73,6 +74,11 @@ export const testCaseCategoryEnum = pgEnum('test_case_category', [
   TestCaseCategory.RANDOM,
   TestCaseCategory.STRESS,
   TestCaseCategory.ADVERSARIAL,
+]);
+
+export const assessmentFlagTypeEnum = pgEnum('assessment_flag_type', [
+  AssessmentFlagType.TAB_SWITCH,
+  AssessmentFlagType.PASTE,
 ]);
 
 // ─── Table definitions — ordered so every reference points backward ────────────
@@ -299,6 +305,119 @@ export const aiReviews = pgTable('ai_reviews', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+// ─── Assessments ──────────────────────────────────────────────────────────────
+
+export const assessments = pgTable(
+  'assessments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    title: varchar('title', { length: 255 }).notNull(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    durationMinutes: integer('duration_minutes').notNull(),
+    startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
+    endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
+    allowedLanguages: jsonb('allowed_languages').notNull().default(sql`'[]'::jsonb`),
+    randomizeProblems: boolean('randomize_problems').notNull().default(false),
+    uniqueVariants: boolean('unique_variants').notNull().default(false),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    orgIdx: index('assessments_org_idx').on(t.orgId),
+    timeIdx: index('assessments_time_idx').on(t.startsAt, t.endsAt),
+  }),
+);
+
+export const assessmentProblems = pgTable(
+  'assessment_problems',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    assessmentId: uuid('assessment_id')
+      .notNull()
+      .references(() => assessments.id, { onDelete: 'cascade' }),
+    problemId: uuid('problem_id')
+      .notNull()
+      .references(() => problems.id, { onDelete: 'cascade' }),
+    points: integer('points').notNull().default(100),
+    orderIndex: integer('order_index').notNull().default(0),
+  },
+  (t) => ({
+    uniquePair: uniqueIndex('assessment_problems_unique').on(t.assessmentId, t.problemId),
+    assessmentIdx: index('assessment_problems_assessment_idx').on(t.assessmentId),
+  }),
+);
+
+export const candidateSessions = pgTable(
+  'candidate_sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    assessmentId: uuid('assessment_id')
+      .notNull()
+      .references(() => assessments.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    candidateEmail: varchar('candidate_email', { length: 255 }).notNull(),
+    token: varchar('token', { length: 255 }).notNull(),
+    problemOrder: jsonb('problem_order').notNull().default(sql`'[]'::jsonb`),
+    variantConfig: jsonb('variant_config'),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }),
+    score: integer('score'),
+    tabSwitches: integer('tab_switches').notNull().default(0),
+    pasteEvents: integer('paste_events').notNull().default(0),
+  },
+  (t) => ({
+    tokenIdx: uniqueIndex('candidate_sessions_token_idx').on(t.token),
+    emailAssessmentIdx: uniqueIndex('candidate_sessions_email_assessment_idx').on(
+      t.assessmentId,
+      t.candidateEmail,
+    ),
+    assessmentIdx: index('candidate_sessions_assessment_idx').on(t.assessmentId),
+  }),
+);
+
+export const candidateFlags = pgTable(
+  'candidate_flags',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => candidateSessions.id, { onDelete: 'cascade' }),
+    type: assessmentFlagTypeEnum('type').notNull(),
+    metadata: jsonb('metadata'),
+    flaggedAt: timestamp('flagged_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    sessionIdx: index('candidate_flags_session_idx').on(t.sessionId),
+    typeIdx: index('candidate_flags_type_idx').on(t.type),
+  }),
+);
+
+export const orgInvites = pgTable(
+  'org_invites',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: uuid('org_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    email: varchar('email', { length: 255 }).notNull(),
+    role: varchar('role', { length: 20 }).notNull().default('member'),
+    token: varchar('token', { length: 255 }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    tokenIdx: uniqueIndex('org_invites_token_idx').on(t.token),
+    orgEmailIdx: index('org_invites_org_email_idx').on(t.orgId, t.email),
+  }),
+);
+
 // ─── Relations ─────────────────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -353,4 +472,30 @@ export const submissionsRelations = relations(submissions, ({ one }) => ({
 
 export const aiReviewsRelations = relations(aiReviews, ({ one }) => ({
   submission: one(submissions, { fields: [aiReviews.submissionId], references: [submissions.id] }),
+}));
+
+export const assessmentsRelations = relations(assessments, ({ one, many }) => ({
+  organization: one(organizations, { fields: [assessments.orgId], references: [organizations.id] }),
+  creator: one(users, { fields: [assessments.createdBy], references: [users.id] }),
+  problems: many(assessmentProblems),
+  sessions: many(candidateSessions),
+}));
+
+export const assessmentProblemsRelations = relations(assessmentProblems, ({ one }) => ({
+  assessment: one(assessments, { fields: [assessmentProblems.assessmentId], references: [assessments.id] }),
+  problem: one(problems, { fields: [assessmentProblems.problemId], references: [problems.id] }),
+}));
+
+export const candidateSessionsRelations = relations(candidateSessions, ({ one, many }) => ({
+  assessment: one(assessments, { fields: [candidateSessions.assessmentId], references: [assessments.id] }),
+  user: one(users, { fields: [candidateSessions.userId], references: [users.id] }),
+  flags: many(candidateFlags),
+}));
+
+export const candidateFlagsRelations = relations(candidateFlags, ({ one }) => ({
+  session: one(candidateSessions, { fields: [candidateFlags.sessionId], references: [candidateSessions.id] }),
+}));
+
+export const orgInvitesRelations = relations(orgInvites, ({ one }) => ({
+  organization: one(organizations, { fields: [orgInvites.orgId], references: [organizations.id] }),
 }));

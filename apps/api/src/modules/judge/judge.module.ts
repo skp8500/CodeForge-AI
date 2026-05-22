@@ -6,6 +6,7 @@ import IORedis from 'ioredis';
 import { QUEUE_NAMES } from '@codeforge/shared';
 
 import { DatabaseModule } from '../../database/database.module';
+import { RedisModule } from '../../redis/redis.module';
 import { AiModule } from '../ai/ai.module';
 import { JudgeController } from './judge.controller';
 import { JudgeService } from './judge.service';
@@ -24,7 +25,7 @@ const DEFAULT_JOB_OPTIONS = {
 };
 
 @Module({
-  imports: [DatabaseModule, AiModule],
+  imports: [DatabaseModule, RedisModule, AiModule],
   controllers: [JudgeController],
   providers: [
     // Shared BullMQ connection (ioredis instance passed to all queues)

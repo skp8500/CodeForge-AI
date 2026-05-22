@@ -50,3 +50,8 @@ export enum ContestScoringMode {
   IOI = 'ioi',
   CUSTOM = 'custom',
 }
+
+export enum AssessmentFlagType {
+  TAB_SWITCH = 'tab_switch',
+  PASTE = 'paste',
+}

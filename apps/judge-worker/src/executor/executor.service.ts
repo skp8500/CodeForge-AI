@@ -66,8 +66,10 @@ export class ExecutorService {
         });
 
         const verdict = computeTestVerdict(raw, tc.expectedOutput);
-
         testCaseResults.push(this.buildResult(i, verdict, raw));
+
+        // Notify caller of progress after each test case
+        await request.onTestCaseComplete?.(i + 1, request.testCases.length);
 
         if (request.stopOnFirstFail && verdict !== Verdict.AC) {
           break;

@@ -311,3 +311,166 @@ export const generateTests = (problemId: string) =>
 
 export const cancelSubmission = (id: string) =>
   request<void>(`/api/v1/submissions/${id}`, { method: 'DELETE' });
+
+// ─── Organizations API ────────────────────────────────────────────────────────
+
+export interface OrgInfo {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string;
+  ownerId: string;
+  memberCount: number;
+  createdAt: string;
+}
+
+export interface OrgMember {
+  id: string;
+  userId: string;
+  role: string;
+  joinedAt: string;
+  email: string;
+  username: string;
+}
+
+export const getOrg = (slug: string) =>
+  request<OrgInfo>(`/api/v1/orgs/${slug}`);
+
+export const getOrgMembers = (orgId: string) =>
+  request<OrgMember[]>(`/api/v1/orgs/${orgId}/members`);
+
+export const inviteOrgMember = (orgId: string, body: { email: string; role: 'member' | 'admin' }) =>
+  request<{ invited: boolean; email: string }>(`/api/v1/orgs/${orgId}/members`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+export const updateOrgMemberRole = (orgId: string, userId: string, role: 'member' | 'admin') =>
+  request<{ updated: boolean }>(`/api/v1/orgs/${orgId}/members/${userId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role }),
+  });
+
+export const removeOrgMember = (orgId: string, userId: string) =>
+  request<{ removed: boolean }>(`/api/v1/orgs/${orgId}/members/${userId}`, {
+    method: 'DELETE',
+  });
+
+export const acceptOrgInvite = (token: string) =>
+  request<{ orgSlug: string; orgName: string }>(`/api/v1/orgs/invite/accept`, {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+
+// ─── Assessments API ──────────────────────────────────────────────────────────
+
+export interface AssessmentListItem {
+  id: string;
+  title: string;
+  durationMinutes: number;
+  startsAt: string;
+  endsAt: string;
+  allowedLanguages: string[];
+  randomizeProblems: boolean;
+  uniqueVariants: boolean;
+  createdAt: string;
+}
+
+export interface CandidateResult {
+  id: string;
+  candidateEmail: string;
+  startedAt: string | null;
+  submittedAt: string | null;
+  score: number | null;
+  tabSwitches: number;
+  pasteEvents: number;
+  problemsAttempted: number;
+  problemsSolved: number;
+  avgRuntimeMs: number | null;
+  plagiarismRisk: 'high' | 'low';
+}
+
+export interface AssessmentProblem {
+  id: string;
+  title: string;
+  slug: string;
+  statement: string;
+  difficulty: 'easy' | 'medium' | 'hard';
+  constraints: unknown;
+  timeLimitMs: number;
+  memoryLimitMb: number;
+}
+
+export interface CandidateVerifyResult {
+  session: { id: string; startedAt: string; submittedAt: string | null };
+  assessment: {
+    id: string;
+    title: string;
+    durationMinutes: number;
+    startsAt: string;
+    endsAt: string;
+    allowedLanguages: string[];
+  };
+  problems: AssessmentProblem[];
+  candidateJwt: string;
+}
+
+export const listOrgAssessments = (orgId: string) =>
+  request<AssessmentListItem[]>(`/api/v1/assessments/org/${orgId}`);
+
+export const createAssessment = (body: {
+  title: string;
+  orgId: string;
+  problemIds: string[];
+  durationMinutes: number;
+  startsAt: string;
+  endsAt: string;
+  allowedLanguages: string[];
+  randomizeProblems: boolean;
+  uniqueVariants: boolean;
+}) =>
+  request<{ id: string; title: string }>(`/api/v1/assessments`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+export const inviteCandidates = (assessmentId: string, emails: string[]) =>
+  request<{ invited: number; alreadyInvited: number }>(
+    `/api/v1/assessments/${assessmentId}/candidates`,
+    { method: 'POST', body: JSON.stringify({ emails }) },
+  );
+
+export const getAssessmentResults = (assessmentId: string) =>
+  request<CandidateResult[]>(`/api/v1/assessments/${assessmentId}/results`);
+
+export const verifyAssessmentToken = (assessmentId: string, token: string) =>
+  request<CandidateVerifyResult>(
+    `/api/v1/assessments/${assessmentId}/candidate/verify?token=${encodeURIComponent(token)}`,
+  );
+
+export const logCandidateFlag = (
+  assessmentId: string,
+  body: { type: 'tab_switch' | 'paste'; metadata?: Record<string, unknown> },
+  candidateJwt: string,
+) =>
+  request<void>(`/api/v1/assessments/${assessmentId}/candidate/flag`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+    headers: { Authorization: `Bearer ${candidateJwt}` },
+  });
+
+export const submitCandidateSession = (assessmentId: string, candidateJwt: string) =>
+  request<{ score: number }>(`/api/v1/assessments/${assessmentId}/candidate/submit`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${candidateJwt}` },
+  });
+
+export const candidateCreateSubmission = (
+  body: { problemId: string; language: string; code: string },
+  candidateJwt: string,
+) =>
+  request<{ submissionId: string; position: number }>(`/api/v1/submissions`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+    headers: { Authorization: `Bearer ${candidateJwt}` },
+  });

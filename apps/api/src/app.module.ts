@@ -13,6 +13,7 @@ import { AiModule } from './modules/ai/ai.module';
 import { ContestsModule } from './modules/contests/contests.module';
 import { HealthModule } from './modules/health/health.module';
 import { JudgeModule } from './modules/judge/judge.module';
+import { AssessmentsModule } from './modules/assessments/assessments.module';
 import { OrgsModule } from './modules/orgs/orgs.module';
 import { ProblemsModule } from './modules/problems/problems.module';
 import { WebsocketModule } from './modules/websocket/websocket.module';
@@ -44,6 +45,7 @@ import { UsersModule } from './users/users.module';
     ProblemsModule,
     ContestsModule,
     OrgsModule,
+    AssessmentsModule,
     WebsocketModule,
     HealthModule,
   ],

@@ -1,18 +1,8 @@
 'use client';
 import { useCallback, useEffect, useRef } from 'react';
-import { io, type Socket } from 'socket.io-client';
 import { createSubmission, getSubmissionReview, cancelSubmission } from '@/lib/api';
+import { subscribeToSubmission, type VerdictData, type ReviewData } from '@/lib/socket';
 import { useEditorStore, type SubmissionVerdict, type AiReview } from '@/store/editor-store';
-
-const WS_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
-
-let _socket: Socket | null = null;
-function getSocket(): Socket {
-  if (!_socket) {
-    _socket = io(`${WS_URL}/ws`, { transports: ['websocket', 'polling'] });
-  }
-  return _socket;
-}
 
 export function useSubmission(problemId: string, language: string, code: string) {
   const store = useEditorStore();
@@ -20,57 +10,56 @@ export function useSubmission(problemId: string, language: string, code: string)
 
   const subscribeToVerdict = useCallback(
     (submissionId: string, lang: string) => {
-      const socket = getSocket();
-      socket.emit('subscribe', { submissionId });
+      return subscribeToSubmission(submissionId, {
+        onExecuting(data) {
+          store.setQueuePosition(null);
+          store.setExecutingProgress({ current: data.completed, total: data.total });
+        },
 
-      const onProgress = (data: { current: number; total: number }) => {
-        store.setQueuePosition(null);
-        store.setExecutingProgress({ current: data.current, total: data.total });
-      };
+        onVerdict(data: VerdictData) {
+          const verdict: SubmissionVerdict = {
+            id: data.submissionId,
+            verdict: data.verdict,
+            runtimeMs: data.runtimeMs,
+            memoryKb: data.memoryKb,
+            testCasesPassed: data.testCasesPassed,
+            totalTestCases: data.totalTestCases,
+            compileError: data.compileError,
+            failingTestCase: data.failingTestCase,
+          };
 
-      const onVerdict = (data: SubmissionVerdict) => {
-        store.setVerdict(data);
-        store.setIsSubmitting(false);
-        store.setQueuePosition(null);
-        store.setExecutingProgress(null);
-        store.setActiveTestTab('result');
+          store.setVerdict(verdict);
+          store.setIsSubmitting(false);
+          store.setQueuePosition(null);
+          store.setExecutingProgress(null);
+          store.setActiveTestTab('result');
 
-        store.prependSubmission({
-          id: data.id || submissionId,
-          verdict: data.verdict,
-          language: lang,
-          runtimeMs: data.runtimeMs,
-          submittedAt: new Date().toISOString(),
-        });
+          store.prependSubmission({
+            id: data.submissionId,
+            verdict: data.verdict,
+            language: lang,
+            runtimeMs: data.runtimeMs,
+            submittedAt: new Date().toISOString(),
+          });
 
-        store.setAiReviewLoading(true);
-        setTimeout(async () => {
-          try {
-            const review = await getSubmissionReview(submissionId);
-            store.setAiReview(review as AiReview);
-          } catch {
-            // Review not ready yet; WebSocket will deliver it
-          } finally {
-            store.setAiReviewLoading(false);
-          }
-        }, 2500);
-      };
+          store.setAiReviewLoading(true);
+          setTimeout(async () => {
+            try {
+              const review = await getSubmissionReview(submissionId);
+              store.setAiReview(review as AiReview);
+            } catch {
+              // Review not ready yet — WebSocket will deliver it via onReview
+            } finally {
+              store.setAiReviewLoading(false);
+            }
+          }, 2500);
+        },
 
-      const onReview = (data: AiReview) => {
-        store.setAiReview(data);
-        store.setAiReviewLoading(false);
-      };
-
-      socket.on('submission:progress', onProgress);
-      socket.on('submission:verdict', onVerdict);
-      socket.on('submission:review', onReview);
-
-      return () => {
-        socket.off('submission:progress', onProgress);
-        socket.off('submission:verdict', onVerdict);
-        socket.off('submission:review', onReview);
-        socket.emit('unsubscribe', { submissionId });
-      };
+        onReview(data: ReviewData) {
+          store.setAiReview(data.review as AiReview);
+          store.setAiReviewLoading(false);
+        },
+      });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -109,7 +98,7 @@ export function useSubmission(problemId: string, language: string, code: string)
     try {
       await cancelSubmission(id);
     } catch {
-      // Already judged or not found — just reset UI
+      // Already judged or not found — reset UI regardless
     }
     unsubRef.current?.();
     unsubRef.current = null;

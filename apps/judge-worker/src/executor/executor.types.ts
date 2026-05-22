@@ -14,6 +14,13 @@ export interface ExecutionRequest {
   memoryLimitMb: number;
   /** Stop running test cases after the first non-AC verdict (contest mode). */
   stopOnFirstFail?: boolean;
+  /**
+   * Called after each test case completes. Useful for streaming progress to
+   * the client without waiting for all tests to finish.
+   * @param completed - number of test cases finished so far (1-based)
+   * @param total     - total number of test cases
+   */
+  onTestCaseComplete?: (completed: number, total: number) => void | Promise<void>;
 }
 
 export interface TestCaseResult {

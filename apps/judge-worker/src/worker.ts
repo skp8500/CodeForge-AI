@@ -4,7 +4,14 @@ import IORedis from 'ioredis';
 
 import { submissions, testCases } from '@codeforge/db';
 import type { Db } from '@codeforge/db';
-import { Verdict, QUEUE_NAMES, type JudgeResultPayload, type SubmissionJob } from '@codeforge/shared';
+import {
+  Verdict,
+  QUEUE_NAMES,
+  JUDGE_EVENTS_CHANNEL,
+  type JudgeEventPayload,
+  type JudgeResultPayload,
+  type SubmissionJob,
+} from '@codeforge/shared';
 
 import { ExecutorService } from './executor/executor.service.js';
 import type { ExecutionResult } from './executor/executor.types.js';
@@ -95,6 +102,7 @@ function makeProcessor(deps: WorkerDeps & { publisher: IORedis; aiQueue: Queue }
     }
 
     // 2. Execute
+    const { userId } = job.data;
     let result: ExecutionResult;
     try {
       result = await executor.execute({
@@ -106,6 +114,18 @@ function makeProcessor(deps: WorkerDeps & { publisher: IORedis; aiQueue: Queue }
         memoryLimitMb,
         // Contest mode stops on first failure (faster feedback + leaderboard accuracy)
         stopOnFirstFail: mode === 'contest',
+        onTestCaseComplete: async (completed, total) => {
+          // Throttle: publish every 5 completions or on the final case
+          if (completed % 5 !== 0 && completed !== total) return;
+          const executingEvent: JudgeEventPayload = {
+            userId,
+            event: 'submission:executing',
+            data: { submissionId, completed, total },
+          };
+          await publisher
+            .publish(JUDGE_EVENTS_CHANNEL, JSON.stringify(executingEvent))
+            .catch(() => {});
+        },
       });
     } catch (err) {
       log('error', 'Executor threw unexpectedly — marking IE and retrying', {
@@ -171,6 +191,21 @@ function makeProcessor(deps: WorkerDeps & { publisher: IORedis; aiQueue: Queue }
       failingTestCase,
     };
     await publisher.publish(`submissions:${submissionId}`, JSON.stringify(payload));
+
+    // Also route verdict to the new judge:events channel for the /judge gateway
+    const verdictEvent: JudgeEventPayload = {
+      userId,
+      event: 'submission:verdict',
+      data: payload,
+    };
+    await publisher
+      .publish(JUDGE_EVENTS_CHANNEL, JSON.stringify(verdictEvent))
+      .catch((err) =>
+        log('warn', 'Failed to publish submission:verdict to judge:events', {
+          submissionId,
+          error: String(err),
+        }),
+      );
 
     // 6. Queue an AI code-review job (fire-and-forget) unless execution errored
     if (result.verdict !== Verdict.IE) {

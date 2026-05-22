@@ -79,6 +79,25 @@ export class UsersService {
     }
   }
 
+  async findOrCreateGuest(email: string): Promise<UserRow> {
+    const existing = await this.findByEmail(email);
+    if (existing) return existing;
+
+    const baseUsername = email
+      .split('@')[0]
+      .replace(/[^a-zA-Z0-9_-]/g, '')
+      .slice(0, 40);
+    const username = await this.uniqueUsername(baseUsername || 'candidate');
+
+    return this.create({
+      username,
+      email,
+      passwordHash: null,
+      role: UserRole.GUEST,
+      isVerified: false,
+    });
+  }
+
   async markVerified(id: string): Promise<void> {
     await this.db
       .update(users)

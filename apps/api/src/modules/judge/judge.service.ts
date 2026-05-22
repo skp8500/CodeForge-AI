@@ -1,12 +1,19 @@
 import { HttpException, HttpStatus, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { count, eq, isNull, and } from 'drizzle-orm';
 import type { Queue } from 'bullmq';
+import type IORedis from 'ioredis';
 
 import { problems, submissions } from '@codeforge/db';
 import type { Db } from '@codeforge/db';
-import { QUEUE_NAMES, type SubmissionJob } from '@codeforge/shared';
+import {
+  JUDGE_EVENTS_CHANNEL,
+  QUEUE_NAMES,
+  type JudgeEventPayload,
+  type SubmissionJob,
+} from '@codeforge/shared';
 
 import { DB_TOKEN } from '../../database/database.module';
+import { REDIS_TOKEN } from '../../redis/redis.module';
 import {
   CONTEST_QUEUE_TOKEN,
   PRACTICE_QUEUE_TOKEN,
@@ -22,6 +29,7 @@ export class JudgeService {
 
   constructor(
     @Inject(DB_TOKEN) private readonly db: Db,
+    @Inject(REDIS_TOKEN) private readonly redis: IORedis,
     @Inject(CONTEST_QUEUE_TOKEN) private readonly contestQueue: Queue,
     @Inject(PRACTICE_QUEUE_TOKEN) private readonly practiceQueue: Queue,
   ) {}
@@ -81,7 +89,19 @@ export class JudgeService {
     });
 
     const position = await queue.getWaitingCount();
-    this.logger.log(`Enqueued submission ${submissionId} (${dto.language}, ${isContest ? 'contest' : 'practice'}, pos ~${position})`);
+    this.logger.log(
+      `Enqueued submission ${submissionId} (${dto.language}, ${isContest ? 'contest' : 'practice'}, pos ~${position})`,
+    );
+
+    // 5. Notify the user's browser that their submission is now queued
+    const queuedEvent: JudgeEventPayload = {
+      userId,
+      event: 'submission:queued',
+      data: { submissionId, position },
+    };
+    await this.redis
+      .publish(JUDGE_EVENTS_CHANNEL, JSON.stringify(queuedEvent))
+      .catch((err) => this.logger.warn('Failed to publish submission:queued', err));
 
     return { submissionId, position };
   }
@@ -114,7 +134,7 @@ export class JudgeService {
     };
   }
 
-  // ─── Private ───────────────────────────────────────────────────────────────
+  // ─── Cancel submission ──────────────────────────────────────────────────────
 
   async cancelSubmission(id: string, userId: string): Promise<void> {
     const [updated] = await this.db
@@ -124,6 +144,8 @@ export class JudgeService {
       .returning({ id: submissions.id });
     if (!updated) throw new NotFoundException('Submission not found, already judged, or access denied');
   }
+
+  // ─── Private ───────────────────────────────────────────────────────────────
 
   private async fetchProblem(problemId: string) {
     const [row] = await this.db

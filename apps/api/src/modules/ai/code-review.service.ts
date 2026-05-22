@@ -6,7 +6,7 @@ import type IORedis from 'ioredis';
 
 import { aiReviews, submissions, problems, testCases } from '@codeforge/db';
 import type { Db } from '@codeforge/db';
-import { Verdict, QUEUE_NAMES } from '@codeforge/shared';
+import { JUDGE_EVENTS_CHANNEL, Verdict, QUEUE_NAMES, type JudgeEventPayload } from '@codeforge/shared';
 import type { Language } from '@codeforge/shared';
 
 import { DB_TOKEN } from '../../database/database.module';
@@ -49,6 +49,7 @@ export class CodeReviewService {
     const [sub] = await this.db
       .select({
         id: submissions.id,
+        userId: submissions.userId,
         code: submissions.code,
         language: submissions.language,
         verdict: submissions.verdict,
@@ -129,10 +130,21 @@ export class CodeReviewService {
       ...result,
       createdAt: new Date(),
     };
+
+    // Publish to legacy channel (old /ws gateway) and new /judge gateway
     await this.redis.publish(
       `submissions:${submissionId}:review`,
       JSON.stringify(publishPayload),
     );
+
+    const reviewEvent: JudgeEventPayload = {
+      userId: sub.userId,
+      event: 'submission:review',
+      data: { submissionId, review: publishPayload },
+    };
+    await this.redis
+      .publish(JUDGE_EVENTS_CHANNEL, JSON.stringify(reviewEvent))
+      .catch((err) => this.logger.warn('Failed to publish submission:review to judge:events', err));
 
     this.logger.log(`AI review generated for submission ${submissionId}`);
   }
