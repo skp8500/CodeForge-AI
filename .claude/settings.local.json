@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx jest *)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\dkpat\\\\Documents\\\\GitHub\\\\CodeForge AI\\\\apps\\\\web\" -Recurse -Force)",
+      "Bash(Select-Object FullName, PSIsContainer)",
+      "Bash(Sort-Object FullName)",
+      "Bash(Format-Table -AutoSize)"
+    ]
+  }
+}

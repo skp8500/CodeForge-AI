@@ -1,0 +1,4 @@
+FROM gcc:13-bookworm
+WORKDIR /code
+# Compile solution.cpp → solution (static binary for portability)
+ENTRYPOINT ["g++", "-O2", "-std=c++17", "-static", "-o", "/code/solution", "/code/solution.cpp"]

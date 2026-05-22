@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm test *)",
+      "Bash(pnpm install *)",
+      "Read(//c/Users/dkpat/.claude/projects/c--Users-dkpat-Documents-GitHub-CodeForge-AI/memory/**)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\dkpat\\.claude\\projects\\c--Users-dkpat-Documents-GitHub-CodeForge-AI\\memory"
+    ]
+  }
+}

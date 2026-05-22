@@ -1,0 +1,23 @@
+{
+  "name": "@codeforge/config",
+  "version": "0.0.1",
+  "private": true,
+  "exports": {
+    "./eslint": "./eslint.js",
+    "./eslint-next": "./eslint-next.js",
+    "./eslint-nest": "./eslint-nest.js",
+    "./tsconfig": "./tsconfig.json",
+    "./tsconfig-next": "./tsconfig-next.json",
+    "./tsconfig-nest": "./tsconfig-nest.json",
+    "./tailwind": "./tailwind.js"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.9.0",
+    "@typescript-eslint/parser": "^7.9.0",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "^14.2.3",
+    "eslint-plugin-import": "^2.29.1",
+    "tailwindcss": "^3.4.3",
+    "typescript": "^5.4.5"
+  }
+}

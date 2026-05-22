@@ -1,0 +1,89 @@
+# Kubernetes HPA for the judge-worker Deployment.
+#
+# Scales based on two signals:
+#   1. CPU utilisation (catches executor-bound bursts)
+#   2. Redis queue depth via a custom metric emitted by kube-prometheus-stack
+#      + redis_exporter + a PrometheusAdapter rule (see k8s/prometheus/adapter-config.yaml).
+#
+# The queue-depth metric formula:
+#   redis_list_length{key=~"bull:(contest|practice|batch)-submissions:wait"}
+# is summed across all three queues so a single batch-regrade storm doesn't
+# starve contest submissions of scale-up headroom.
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: judge-worker-hpa
+  namespace: codeforge
+  labels:
+    app: judge-worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: judge-worker
+
+  minReplicas: 1
+  maxReplicas: 20
+
+  metrics:
+    # ── CPU signal ────────────────────────────────────────────────────────────
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          # Each worker pod runs 4 concurrent Docker subprocesses; keep CPU
+          # headroom so compilation doesn't saturate the node.
+          averageUtilization: 60
+
+    # ── Queue-depth signal (custom metric from redis_exporter) ────────────────
+    # Scale out when average waiting jobs per pod exceeds 8.
+    # With CONTEST_CONCURRENCY=2, PRACTICE=1, BATCH=1 per pod this keeps
+    # latency below ~2× the average execution time.
+    - type: External
+      external:
+        metric:
+          name: judge_queue_waiting_total
+          selector:
+            matchLabels:
+              app: judge-worker
+        target:
+          type: AverageValue
+          averageValue: "8"
+
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30   # react quickly to submission bursts
+      policies:
+        - type: Pods
+          value: 4                      # add up to 4 pods at once
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300  # avoid flapping during lulls
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 120
+
+---
+# PrometheusAdapter rule that surfaces the Redis list length as a k8s custom metric.
+# Apply with: kubectl apply -f k8s/judge-worker-hpa.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-adapter-config-patch
+  namespace: monitoring
+data:
+  config.yaml: |
+    rules:
+      - seriesQuery: 'redis_list_length{key=~"bull:(contest|practice|batch)-submissions:wait"}'
+        resources:
+          overrides:
+            namespace:
+              resource: namespace
+        name:
+          matches: "redis_list_length"
+          as: "judge_queue_waiting_total"
+        metricsQuery: 'sum(<<.Series>>{<<.LabelMatchers>>})'

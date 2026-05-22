@@ -1,0 +1,4 @@
+FROM eclipse-temurin:21-jre-jammy
+WORKDIR /code
+# -cp /code puts the compiled .class files on the classpath
+ENTRYPOINT ["java", "-cp", "/code", "Solution"]
