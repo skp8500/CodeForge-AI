@@ -1,29 +1,63 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
-function getAuthToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem('accessToken');
+interface ApiOptions extends RequestInit {
+  token?: string;
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = getAuthToken();
-  const res = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
+function getStoredToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('cf_access_token') ?? localStorage.getItem('accessToken');
+}
+
+export async function apiClient<T>(
+  endpoint: string,
+  options: ApiOptions = {},
+): Promise<T> {
+  const { token, ...fetchOptions } = options;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...((fetchOptions.headers as Record<string, string> | undefined) ?? {}),
+  };
+
+  const authToken = token ?? getStoredToken();
+  if (authToken) {
+    headers.Authorization = `Bearer ${authToken}`;
+  }
+
+  const res = await fetch(`${BASE_URL}/api/v1${endpoint}`, {
+    ...fetchOptions,
+    headers,
+    credentials: 'include',
   });
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
-    throw new Error((err as { error?: { message?: string } })?.error?.message ?? `Request failed: ${res.status}`);
+    const error = await res.json().catch(() => ({ error: { message: res.statusText } }));
+    throw new Error(
+      (error as { error?: { message?: string } })?.error?.message ?? `HTTP ${res.status}`,
+    );
   }
 
-  if (res.status === 204) return undefined as T;
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
   return res.json() as Promise<T>;
 }
+
+async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
+  return apiClient<T>(path.replace(/^\/api\/v1/, ''), options);
+}
+
+export const api = {
+  get: <T>(path: string, token?: string) => apiClient<T>(path, { method: 'GET', token }),
+  post: <T>(path: string, body: unknown, token?: string) =>
+    apiClient<T>(path, { method: 'POST', body: JSON.stringify(body), token }),
+  patch: <T>(path: string, body: unknown, token?: string) =>
+    apiClient<T>(path, { method: 'PATCH', body: JSON.stringify(body), token }),
+  delete: <T>(path: string, token?: string) =>
+    apiClient<T>(path, { method: 'DELETE', token }),
+};
 
 // ─── Domain types ─────────────────────────────────────────────────────────────
 

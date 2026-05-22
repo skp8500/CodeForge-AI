@@ -1,14 +1,13 @@
 import { ConflictException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { Test, type TestingModule } from '@nestjs/testing';
 import type { Response } from 'express';
 
 import { UserRole } from '@codeforge/shared';
 
 import { MailService } from '../mail/mail.service';
 import { REDIS_TOKEN } from '../redis/redis.module';
-import type { UsersService } from '../users/users.service';
+import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -99,52 +98,17 @@ describe('AuthService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-
-    // Default bcrypt behavior: valid password compare returns true
-    // We mock bcrypt at module level using jest.mock at the top if needed,
-    // but here we rely on the actual bcrypt module being called.
-    // Instead, stub the password hash in the fixture to a real bcrypt hash.
-
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        AuthService,
-        { provide: 'UsersService', useValue: mockUsersService },
-        { provide: JwtService, useValue: mockJwtService },
-        { provide: ConfigService, useValue: mockConfigService },
-        { provide: MailService, useValue: mockMailService },
-        { provide: REDIS_TOKEN, useValue: mockRedis },
-      ],
-    })
-      .overrideProvider('UsersService')
-      .useValue(mockUsersService)
-      .compile();
-
-    // NestJS looks up the provider by class, so explicitly override by class token
-    const mod = await Test.createTestingModule({
-      providers: [
-        AuthService,
-        { provide: JwtService, useValue: mockJwtService },
-        { provide: ConfigService, useValue: mockConfigService },
-        { provide: MailService, useValue: mockMailService },
-        { provide: REDIS_TOKEN, useValue: mockRedis },
-        {
-          provide: 'UsersService',
-          useValue: mockUsersService,
-        },
-      ],
-    }).compile();
+    mockJwtService.signAsync.mockReset();
+    mockJwtService.verifyAsync.mockReset();
 
     // Manually construct so we can inject the mocks by value
     authService = new AuthService(
-      mockUsersService as unknown as import('../users/users.service').UsersService,
+      mockUsersService as unknown as UsersService,
       mockJwtService as unknown as JwtService,
       mockConfigService as unknown as ConfigService,
       mockMailService as unknown as MailService,
       mockRedis as never,
     );
-
-    void module; // suppress unused warning
-    void mod;
   });
 
   // ─── register ───────────────────────────────────────────────────────────────
@@ -224,7 +188,16 @@ describe('AuthService', () => {
 
       const result = await authService.login(VALID_LOGIN_BODY, mockResponse);
 
-      expect(result).toEqual({ accessToken: 'access-token' });
+      expect(result).toEqual({
+        accessToken: 'access-token',
+        user: expect.objectContaining({
+          id: userWithHash.id,
+          email: userWithHash.email,
+          username: userWithHash.username,
+          role: userWithHash.role,
+          rating: userWithHash.rating,
+        }),
+      });
       expect(mockResponse.cookie).toHaveBeenCalledWith(
         'refreshToken',
         'refresh-token',
@@ -424,9 +397,9 @@ describe('AuthService', () => {
 
   describe('generateTokens', () => {
     it('returns an access token and a refresh token', async () => {
-      mockJwtService.signAsync
-        .mockResolvedValueOnce('access-token')
-        .mockResolvedValueOnce('refresh-token');
+      mockJwtService.signAsync.mockImplementation(async (_payload, options) => {
+        return options?.expiresIn === '15m' ? 'access-token' : 'refresh-token';
+      });
 
       const tokens = await authService.generateTokens(mockAdminUser);
 

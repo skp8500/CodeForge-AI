@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import type { Route } from 'next';
 import { DifficultyBadge } from '@/components/ui/difficulty-badge';
 import { VerdictBadge } from '@/components/ui/verdict-badge';
 import { SubmissionHeatmap } from '@/components/dashboard/heatmap';
@@ -90,6 +91,13 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 export function DashboardClient() {
+  const navLinks: Array<{ href: Route; label: string; active: boolean }> = [
+    { href: '/dashboard', label: '◉  Overview', active: true },
+    { href: '/problems', label: '⬡  Problems', active: false },
+    { href: '/create', label: '⚑  Create', active: false },
+    { href: '/dashboard', label: '⚙  Orgs', active: false },
+  ];
+
   const [user, setUser] = useState<User | null>(null);
   const [stats, setStats] = useState<UserStats | null>(null);
   const [heatmap, setHeatmap] = useState<HeatmapEntry[]>([]);
@@ -133,7 +141,7 @@ export function DashboardClient() {
         <div className="text-center">
           <p className="text-lg font-semibold text-gray-300">Sign in to view your dashboard</p>
           <Link
-            href="/auth/login"
+            href="/"
             className="mt-4 inline-block rounded-lg bg-brand-600 px-5 py-2 text-sm font-medium text-white hover:bg-brand-700"
           >
             Sign in
@@ -168,12 +176,7 @@ export function DashboardClient() {
 
         {/* Nav */}
         <nav className="flex-1 px-2 py-3 space-y-0.5">
-          {[
-            { href: '/dashboard', label: '◉  Overview', active: true },
-            { href: '/problems', label: '⬡  Problems', active: false },
-            { href: '/contests', label: '⚑  Contests', active: false },
-            { href: '/settings', label: '⚙  Settings', active: false },
-          ].map(({ href, label, active }) => (
+          {navLinks.map(({ href, label, active }) => (
             <Link
               key={href}
               href={href}

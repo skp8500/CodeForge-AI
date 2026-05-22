@@ -13,7 +13,10 @@ export function useSubmission(problemId: string, language: string, code: string)
       return subscribeToSubmission(submissionId, {
         onExecuting(data) {
           store.setQueuePosition(null);
-          store.setExecutingProgress({ current: data.completed, total: data.total });
+          store.setExecutingProgress({
+            current: data.testCasesComplete,
+            total: data.totalTestCases,
+          });
         },
 
         onVerdict(data: VerdictData) {

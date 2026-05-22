@@ -1,488 +1,494 @@
+import * as dotenv from 'dotenv';
+dotenv.config({ path: '../../.env' });
+
 import bcrypt from 'bcryptjs';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 
-import { Difficulty, Language, TestCaseCategory, UserRole, Verdict } from '@codeforge/shared';
+import { Difficulty, TestCaseCategory, UserRole } from '@codeforge/shared';
 
 import * as schema from './schema.js';
-import {
-  aiReviews,
-  problems,
-  submissions,
-  testCases,
-  users,
-} from './schema.js';
+import { problems, testCases, users } from './schema.js';
 
-// ─── Helpers ───────────────────────────────────────────────────────────────────
+type SeedCase = {
+  input: string;
+  output: string;
+  category: TestCaseCategory;
+};
 
-function slug(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
-}
-
-// ─── Problem seed data ─────────────────────────────────────────────────────────
-
-const SEED_PROBLEMS: Array<{
+type SeedProblem = {
   title: string;
+  slug: string;
   difficulty: Difficulty;
   tags: string[];
   timeLimitMs: number;
   memoryLimitMb: number;
   statement: string;
-  constraints: Record<string, { min: number; max: number }>;
-  samples: Array<{ input: string; output: string; hidden: boolean; category: TestCaseCategory }>;
-}> = [
+  constraints: Record<string, unknown>;
+  visibleCases: SeedCase[];
+  hiddenCases: SeedCase[];
+};
+
+const seedProblems: SeedProblem[] = [
   {
     title: 'Two Sum',
+    slug: 'two-sum',
     difficulty: Difficulty.EASY,
     tags: ['arrays', 'hash-map'],
     timeLimitMs: 1000,
     memoryLimitMb: 256,
-    statement: `Given an array of integers \`nums\` and an integer \`target\`, return the indices of the two numbers that add up to \`target\`.
-
-You may assume that each input has **exactly one solution** and you may not use the same element twice.
-
-**Input format:**
-- Line 1: Two integers \`n\` and \`target\`
-- Line 2: \`n\` space-separated integers
-
-**Output format:**
-Two space-separated integers — the 0-based indices of the two numbers (smaller index first).`,
-    constraints: {
-      n: { min: 2, max: 10000 },
-      nums_elements: { min: -1000000000, max: 1000000000 },
-      target: { min: -1000000000, max: 1000000000 },
-    },
-    samples: [
-      { input: '4 9\n2 7 11 15', output: '0 1', hidden: false, category: TestCaseCategory.SAMPLE },
-      { input: '3 6\n3 2 4', output: '1 2', hidden: false, category: TestCaseCategory.SAMPLE },
-      { input: '2 6\n3 3', output: '0 1', hidden: true, category: TestCaseCategory.EDGE },
-      { input: '2 0\n-1000000000 1000000000', output: '0 1', hidden: true, category: TestCaseCategory.BOUNDARY },
-      { input: '5 100\n10 20 30 40 60', output: '2 4', hidden: true, category: TestCaseCategory.RANDOM },
+    statement:
+      'Given an array of integers and a target value, print the indices of the two elements whose sum equals the target. Exactly one valid pair exists and indices must be printed in ascending order.',
+    constraints: { n: { min: 2, max: 100000 }, values: { min: -1000000000, max: 1000000000 } },
+    visibleCases: [
+      { input: '4 9\n2 7 11 15', output: '0 1', category: TestCaseCategory.SAMPLE },
+      { input: '3 6\n3 2 4', output: '1 2', category: TestCaseCategory.SAMPLE },
+      { input: '2 6\n3 3', output: '0 1', category: TestCaseCategory.SAMPLE },
+      { input: '5 10\n1 2 3 7 8', output: '2 3', category: TestCaseCategory.EDGE },
+      { input: '6 1\n-5 4 3 9 6 -2', output: '0 1', category: TestCaseCategory.RANDOM },
+    ],
+    hiddenCases: [
+      { input: '5 0\n-3 1 2 3 -1', output: '2 4', category: TestCaseCategory.RANDOM },
+      { input: '4 8\n1 5 3 7', output: '0 3', category: TestCaseCategory.RANDOM },
+      { input: '7 13\n5 8 2 11 4 9 1', output: '0 1', category: TestCaseCategory.RANDOM },
+      { input: '2 -10\n-4 -6', output: '0 1', category: TestCaseCategory.BOUNDARY },
+      { input: '5 100\n10 20 30 40 70', output: '2 4', category: TestCaseCategory.RANDOM },
+      { input: '8 15\n1 14 3 5 9 6 7 8', output: '0 1', category: TestCaseCategory.RANDOM },
+      { input: '4 50\n5 20 25 30', output: '1 3', category: TestCaseCategory.EDGE },
+      { input: '6 18\n9 1 17 2 16 8', output: '1 2', category: TestCaseCategory.RANDOM },
+      { input: '5 4\n0 4 8 -2 6', output: '0 1', category: TestCaseCategory.BOUNDARY },
+      { input: '5 11\n2 1 9 5 10', output: '1 2', category: TestCaseCategory.ADVERSARIAL },
     ],
   },
   {
     title: 'Valid Parentheses',
+    slug: 'valid-parentheses',
     difficulty: Difficulty.EASY,
     tags: ['stack', 'strings'],
     timeLimitMs: 1000,
     memoryLimitMb: 256,
-    statement: `Given a string \`s\` containing only \`(\`, \`)\`, \`{\`, \`}\`, \`[\`, \`]\`, determine if the input string is valid.
-
-An input string is valid if:
-1. Open brackets must be closed by the same type of brackets.
-2. Open brackets must be closed in the correct order.
-3. Every close bracket has a corresponding open bracket of the same type.
-
-**Input format:** A single string \`s\`
-
-**Output format:** \`true\` or \`false\``,
-    constraints: {
-      s_length: { min: 1, max: 10000 },
-    },
-    samples: [
-      { input: '()', output: 'true', hidden: false, category: TestCaseCategory.SAMPLE },
-      { input: '()[]{}\n', output: 'true', hidden: false, category: TestCaseCategory.SAMPLE },
-      { input: '(]', output: 'false', hidden: true, category: TestCaseCategory.EDGE },
-      { input: '{[]}', output: 'true', hidden: true, category: TestCaseCategory.RANDOM },
-      { input: '((((((((((', output: 'false', hidden: true, category: TestCaseCategory.STRESS },
+    statement:
+      'Given a string containing only brackets (), {}, and [], output true if the brackets are balanced and properly nested, otherwise false.',
+    constraints: { length: { min: 1, max: 100000 } },
+    visibleCases: [
+      { input: '()', output: 'true', category: TestCaseCategory.SAMPLE },
+      { input: '()[]{}', output: 'true', category: TestCaseCategory.SAMPLE },
+      { input: '(]', output: 'false', category: TestCaseCategory.SAMPLE },
+      { input: '{[]}', output: 'true', category: TestCaseCategory.EDGE },
+      { input: '([{}])', output: 'true', category: TestCaseCategory.RANDOM },
+    ],
+    hiddenCases: [
+      { input: '(((((', output: 'false', category: TestCaseCategory.EDGE },
+      { input: '([)]', output: 'false', category: TestCaseCategory.ADVERSARIAL },
+      { input: '[]{}(()[])', output: 'true', category: TestCaseCategory.RANDOM },
+      { input: ']', output: 'false', category: TestCaseCategory.BOUNDARY },
+      { input: '{{{{}}}}', output: 'true', category: TestCaseCategory.RANDOM },
+      { input: '(()', output: 'false', category: TestCaseCategory.EDGE },
+      { input: '[{()}](){}', output: 'true', category: TestCaseCategory.RANDOM },
+      { input: '([[[[]]]])', output: 'true', category: TestCaseCategory.STRESS },
+      { input: '([{}{}[]])', output: 'true', category: TestCaseCategory.RANDOM },
+      { input: '(){[}]', output: 'false', category: TestCaseCategory.ADVERSARIAL },
     ],
   },
   {
     title: 'Binary Search',
+    slug: 'binary-search',
     difficulty: Difficulty.EASY,
-    tags: ['binary-search', 'arrays'],
+    tags: ['arrays', 'binary-search'],
     timeLimitMs: 500,
     memoryLimitMb: 128,
-    statement: `Given an array of integers \`nums\` sorted in ascending order and an integer \`target\`, return the index of \`target\` if it is in the array, or \`-1\` if it is not.
-
-You must write an algorithm with **O(log n)** runtime complexity.
-
-**Input format:**
-- Line 1: Two integers \`n\` and \`target\`
-- Line 2: \`n\` space-separated integers in ascending order
-
-**Output format:** A single integer — the 0-based index, or -1 if not found.`,
-    constraints: {
-      n: { min: 1, max: 10000 },
-      nums_elements: { min: -1000000000, max: 1000000000 },
-    },
-    samples: [
-      { input: '6 9\n-1 0 3 5 9 12', output: '4', hidden: false, category: TestCaseCategory.SAMPLE },
-      { input: '6 2\n-1 0 3 5 9 12', output: '-1', hidden: false, category: TestCaseCategory.SAMPLE },
-      { input: '1 0\n0', output: '0', hidden: true, category: TestCaseCategory.BOUNDARY },
-      { input: '1 1\n0', output: '-1', hidden: true, category: TestCaseCategory.EDGE },
-      { input: '5 -1000000000\n-1000000000 -3 0 5 1000000000', output: '0', hidden: true, category: TestCaseCategory.BOUNDARY },
+    statement:
+      'Given a sorted array and a target value, return the zero-based index of the target, or -1 if it does not exist.',
+    constraints: { n: { min: 1, max: 100000 } },
+    visibleCases: [
+      { input: '6 9\n-1 0 3 5 9 12', output: '4', category: TestCaseCategory.SAMPLE },
+      { input: '6 2\n-1 0 3 5 9 12', output: '-1', category: TestCaseCategory.SAMPLE },
+      { input: '1 0\n0', output: '0', category: TestCaseCategory.SAMPLE },
+      { input: '5 7\n1 3 5 7 9', output: '3', category: TestCaseCategory.RANDOM },
+      { input: '4 -5\n-9 -5 -2 8', output: '1', category: TestCaseCategory.EDGE },
+    ],
+    hiddenCases: [
+      { input: '1 1\n0', output: '-1', category: TestCaseCategory.BOUNDARY },
+      { input: '8 20\n1 4 6 8 10 12 16 20', output: '7', category: TestCaseCategory.RANDOM },
+      { input: '7 3\n0 1 2 4 5 6 7', output: '-1', category: TestCaseCategory.ADVERSARIAL },
+      { input: '5 -10\n-10 -9 -8 -7 -6', output: '0', category: TestCaseCategory.BOUNDARY },
+      { input: '5 42\n2 8 13 21 34', output: '-1', category: TestCaseCategory.RANDOM },
+      { input: '9 100\n1 5 10 20 30 40 50 60 100', output: '8', category: TestCaseCategory.STRESS },
+      { input: '2 5\n1 5', output: '1', category: TestCaseCategory.BOUNDARY },
+      { input: '6 11\n1 3 5 7 9 11', output: '5', category: TestCaseCategory.RANDOM },
+      { input: '6 -3\n-8 -5 -3 -1 0 2', output: '2', category: TestCaseCategory.RANDOM },
+      { input: '3 8\n3 6 9', output: '-1', category: TestCaseCategory.EDGE },
     ],
   },
   {
     title: 'Climbing Stairs',
+    slug: 'climbing-stairs',
     difficulty: Difficulty.EASY,
     tags: ['dynamic-programming', 'math'],
     timeLimitMs: 500,
     memoryLimitMb: 128,
-    statement: `You are climbing a staircase. It takes \`n\` steps to reach the top. Each time you can either climb 1 or 2 steps. In how many distinct ways can you climb to the top?
-
-**Input format:** A single integer \`n\`
-
-**Output format:** A single integer — the number of distinct ways.`,
-    constraints: {
-      n: { min: 1, max: 45 },
-    },
-    samples: [
-      { input: '2', output: '2', hidden: false, category: TestCaseCategory.SAMPLE },
-      { input: '3', output: '3', hidden: false, category: TestCaseCategory.SAMPLE },
-      { input: '1', output: '1', hidden: true, category: TestCaseCategory.BOUNDARY },
-      { input: '45', output: '1836311903', hidden: true, category: TestCaseCategory.BOUNDARY },
-      { input: '10', output: '89', hidden: true, category: TestCaseCategory.RANDOM },
+    statement:
+      'Given n stairs, output the number of distinct ways to reach the top if each move can climb either 1 step or 2 steps.',
+    constraints: { n: { min: 1, max: 45 } },
+    visibleCases: [
+      { input: '1', output: '1', category: TestCaseCategory.SAMPLE },
+      { input: '2', output: '2', category: TestCaseCategory.SAMPLE },
+      { input: '3', output: '3', category: TestCaseCategory.SAMPLE },
+      { input: '5', output: '8', category: TestCaseCategory.RANDOM },
+      { input: '10', output: '89', category: TestCaseCategory.RANDOM },
+    ],
+    hiddenCases: [
+      { input: '4', output: '5', category: TestCaseCategory.RANDOM },
+      { input: '6', output: '13', category: TestCaseCategory.RANDOM },
+      { input: '7', output: '21', category: TestCaseCategory.RANDOM },
+      { input: '8', output: '34', category: TestCaseCategory.RANDOM },
+      { input: '9', output: '55', category: TestCaseCategory.RANDOM },
+      { input: '11', output: '144', category: TestCaseCategory.RANDOM },
+      { input: '12', output: '233', category: TestCaseCategory.RANDOM },
+      { input: '20', output: '10946', category: TestCaseCategory.STRESS },
+      { input: '30', output: '1346269', category: TestCaseCategory.STRESS },
+      { input: '45', output: '1836311903', category: TestCaseCategory.BOUNDARY },
     ],
   },
   {
     title: 'Maximum Subarray',
+    slug: 'maximum-subarray',
     difficulty: Difficulty.MEDIUM,
-    tags: ['arrays', 'dynamic-programming', 'divide-and-conquer'],
+    tags: ['arrays', 'dynamic-programming'],
     timeLimitMs: 1000,
     memoryLimitMb: 256,
-    statement: `Given an integer array \`nums\`, find the subarray with the largest sum and return its sum.
-
-**Input format:**
-- Line 1: Integer \`n\`
-- Line 2: \`n\` space-separated integers
-
-**Output format:** A single integer — the maximum subarray sum.`,
-    constraints: {
-      n: { min: 1, max: 100000 },
-      nums_elements: { min: -100000, max: 100000 },
-    },
-    samples: [
-      { input: '9\n-2 1 -3 4 -1 2 1 -5 4', output: '6', hidden: false, category: TestCaseCategory.SAMPLE },
-      { input: '1\n1', output: '1', hidden: false, category: TestCaseCategory.SAMPLE },
-      { input: '5\n5 4 -1 7 8', output: '23', hidden: true, category: TestCaseCategory.RANDOM },
-      { input: '3\n-3 -2 -1', output: '-1', hidden: true, category: TestCaseCategory.EDGE },
-      { input: '1\n-100000', output: '-100000', hidden: true, category: TestCaseCategory.BOUNDARY },
+    statement:
+      'Given an integer array, find the contiguous subarray with the largest possible sum and output that sum.',
+    constraints: { n: { min: 1, max: 200000 } },
+    visibleCases: [
+      { input: '9\n-2 1 -3 4 -1 2 1 -5 4', output: '6', category: TestCaseCategory.SAMPLE },
+      { input: '1\n1', output: '1', category: TestCaseCategory.SAMPLE },
+      { input: '5\n5 4 -1 7 8', output: '23', category: TestCaseCategory.SAMPLE },
+      { input: '3\n-3 -2 -1', output: '-1', category: TestCaseCategory.EDGE },
+      { input: '6\n1 -1 1 -1 1 -1', output: '1', category: TestCaseCategory.RANDOM },
+    ],
+    hiddenCases: [
+      { input: '1\n-100000', output: '-100000', category: TestCaseCategory.BOUNDARY },
+      { input: '7\n4 -1 2 1 -5 4 3', output: '8', category: TestCaseCategory.RANDOM },
+      { input: '5\n0 0 0 0 0', output: '0', category: TestCaseCategory.EDGE },
+      { input: '4\n-1 -2 -3 -4', output: '-1', category: TestCaseCategory.RANDOM },
+      { input: '6\n2 3 -2 4 -10 9', output: '9', category: TestCaseCategory.RANDOM },
+      { input: '8\n8 -19 5 -4 20 -7 6 3', output: '23', category: TestCaseCategory.ADVERSARIAL },
+      { input: '5\n100 -1 -2 -3 -4', output: '100', category: TestCaseCategory.BOUNDARY },
+      { input: '6\n-2 -3 4 -1 -2 1', output: '4', category: TestCaseCategory.RANDOM },
+      { input: '7\n1 2 3 4 5 -20 10', output: '15', category: TestCaseCategory.RANDOM },
+      { input: '10\n1 -2 3 10 -4 7 2 -5 4 -1', output: '18', category: TestCaseCategory.STRESS },
     ],
   },
   {
     title: 'Merge Intervals',
+    slug: 'merge-intervals',
     difficulty: Difficulty.MEDIUM,
-    tags: ['intervals', 'sorting', 'arrays'],
+    tags: ['arrays', 'sorting', 'intervals'],
     timeLimitMs: 1000,
     memoryLimitMb: 256,
-    statement: `Given an array of intervals where \`intervals[i] = [start_i, end_i]\`, merge all overlapping intervals and return an array of the non-overlapping intervals that cover all the intervals in the input.
-
-**Input format:**
-- Line 1: Integer \`n\` (number of intervals)
-- Next \`n\` lines: Two space-separated integers \`start end\` for each interval
-
-**Output format:**
-- First line: Integer \`m\` (number of merged intervals)
-- Next \`m\` lines: Two space-separated integers for each merged interval`,
-    constraints: {
-      n: { min: 1, max: 10000 },
-      interval_values: { min: 0, max: 100000 },
-    },
-    samples: [
-      {
-        input: '4\n1 3\n2 6\n8 10\n15 18',
-        output: '3\n1 6\n8 10\n15 18',
-        hidden: false,
-        category: TestCaseCategory.SAMPLE,
-      },
-      { input: '2\n1 4\n4 5', output: '1\n1 5', hidden: false, category: TestCaseCategory.SAMPLE },
-      { input: '1\n0 0', output: '1\n0 0', hidden: true, category: TestCaseCategory.BOUNDARY },
-      {
-        input: '3\n1 4\n0 2\n3 5',
-        output: '1\n0 5',
-        hidden: true,
-        category: TestCaseCategory.RANDOM,
-      },
+    statement:
+      'Given a list of intervals, merge all overlapping intervals and print the resulting intervals in ascending order of start time.',
+    constraints: { n: { min: 1, max: 100000 } },
+    visibleCases: [
+      { input: '4\n1 3\n2 6\n8 10\n15 18', output: '3\n1 6\n8 10\n15 18', category: TestCaseCategory.SAMPLE },
+      { input: '2\n1 4\n4 5', output: '1\n1 5', category: TestCaseCategory.SAMPLE },
+      { input: '1\n0 0', output: '1\n0 0', category: TestCaseCategory.SAMPLE },
+      { input: '3\n1 4\n0 2\n3 5', output: '1\n0 5', category: TestCaseCategory.RANDOM },
+      { input: '3\n5 7\n1 2\n3 4', output: '3\n1 2\n3 4\n5 7', category: TestCaseCategory.RANDOM },
+    ],
+    hiddenCases: [
+      { input: '5\n1 10\n2 3\n4 5\n6 7\n8 9', output: '1\n1 10', category: TestCaseCategory.ADVERSARIAL },
+      { input: '4\n1 2\n2 3\n3 4\n4 5', output: '1\n1 5', category: TestCaseCategory.RANDOM },
+      { input: '2\n10 12\n1 5', output: '2\n1 5\n10 12', category: TestCaseCategory.EDGE },
+      { input: '3\n0 1\n0 2\n0 3', output: '1\n0 3', category: TestCaseCategory.BOUNDARY },
+      { input: '4\n1 3\n5 7\n2 4\n6 8', output: '2\n1 4\n5 8', category: TestCaseCategory.RANDOM },
+      { input: '3\n1 5\n6 10\n10 12', output: '2\n1 5\n6 12', category: TestCaseCategory.RANDOM },
+      { input: '4\n-5 -1\n-3 0\n2 4\n3 5', output: '2\n-5 0\n2 5', category: TestCaseCategory.RANDOM },
+      { input: '2\n100 200\n150 180', output: '1\n100 200', category: TestCaseCategory.BOUNDARY },
+      { input: '3\n7 8\n1 10\n2 3', output: '1\n1 10', category: TestCaseCategory.ADVERSARIAL },
+      { input: '6\n1 2\n4 5\n7 8\n2 4\n5 7\n8 9', output: '1\n1 9', category: TestCaseCategory.STRESS },
     ],
   },
   {
     title: 'Minimum Path Sum',
+    slug: 'minimum-path-sum',
     difficulty: Difficulty.MEDIUM,
-    tags: ['dynamic-programming', 'grids', 'arrays'],
+    tags: ['dynamic-programming', 'grids'],
     timeLimitMs: 1000,
     memoryLimitMb: 256,
-    statement: `Given a \`m x n\` grid filled with non-negative numbers, find a path from the top-left to the bottom-right which minimizes the sum of all numbers along its path.
-
-You can only move either **down** or **right** at any point in time.
-
-**Input format:**
-- Line 1: Two integers \`m\` and \`n\`
-- Next \`m\` lines: \`n\` space-separated integers
-
-**Output format:** A single integer — the minimum path sum.`,
-    constraints: {
-      m: { min: 1, max: 200 },
-      n: { min: 1, max: 200 },
-      grid_elements: { min: 0, max: 100 },
-    },
-    samples: [
-      { input: '3 3\n1 3 1\n1 5 1\n4 2 1', output: '7', hidden: false, category: TestCaseCategory.SAMPLE },
-      { input: '2 3\n1 2 3\n4 5 6', output: '12', hidden: false, category: TestCaseCategory.SAMPLE },
-      { input: '1 1\n5', output: '5', hidden: true, category: TestCaseCategory.BOUNDARY },
-      { input: '1 5\n1 2 3 4 5', output: '15', hidden: true, category: TestCaseCategory.EDGE },
+    statement:
+      'Given an m x n grid of non-negative integers, find the minimum possible sum along a path from the top-left to the bottom-right moving only right or down.',
+    constraints: { m: { min: 1, max: 200 }, n: { min: 1, max: 200 } },
+    visibleCases: [
+      { input: '3 3\n1 3 1\n1 5 1\n4 2 1', output: '7', category: TestCaseCategory.SAMPLE },
+      { input: '2 3\n1 2 3\n4 5 6', output: '12', category: TestCaseCategory.SAMPLE },
+      { input: '1 1\n5', output: '5', category: TestCaseCategory.SAMPLE },
+      { input: '1 5\n1 2 3 4 5', output: '15', category: TestCaseCategory.EDGE },
+      { input: '2 2\n1 100\n1 1', output: '3', category: TestCaseCategory.RANDOM },
+    ],
+    hiddenCases: [
+      { input: '3 2\n1 2\n3 4\n5 6', output: '12', category: TestCaseCategory.RANDOM },
+      { input: '2 2\n9 1\n1 9', output: '19', category: TestCaseCategory.ADVERSARIAL },
+      { input: '4 1\n1\n2\n3\n4', output: '10', category: TestCaseCategory.BOUNDARY },
+      { input: '2 4\n1 1 1 1\n9 9 9 1', output: '5', category: TestCaseCategory.RANDOM },
+      { input: '3 3\n5 9 1\n4 7 2\n3 6 1', output: '15', category: TestCaseCategory.RANDOM },
+      { input: '2 3\n0 0 0\n0 0 0', output: '0', category: TestCaseCategory.BOUNDARY },
+      { input: '3 3\n1 2 5\n3 2 1\n4 3 1', output: '7', category: TestCaseCategory.RANDOM },
+      { input: '4 4\n1 9 9 9\n1 1 9 9\n9 1 1 9\n9 9 1 1', output: '7', category: TestCaseCategory.ADVERSARIAL },
+      { input: '2 2\n100 1\n1 1', output: '102', category: TestCaseCategory.RANDOM },
+      { input: '5 5\n1 1 1 1 1\n1 9 9 9 1\n1 1 1 9 1\n9 9 1 9 1\n1 1 1 1 1', output: '9', category: TestCaseCategory.STRESS },
     ],
   },
   {
     title: 'Number of Islands',
+    slug: 'number-of-islands',
     difficulty: Difficulty.MEDIUM,
-    tags: ['graphs', 'BFS', 'DFS', 'grid'],
+    tags: ['graphs', 'bfs', 'dfs', 'grid'],
     timeLimitMs: 2000,
     memoryLimitMb: 256,
-    statement: `Given an \`m x n\` 2D binary grid where \`1\` represents land and \`0\` represents water, return the number of islands.
-
-An island is surrounded by water and is formed by connecting adjacent lands horizontally or vertically.
-
-**Input format:**
-- Line 1: Two integers \`m\` and \`n\`
-- Next \`m\` lines: \`n\` space-separated characters (\`0\` or \`1\`)
-
-**Output format:** A single integer — the number of islands.`,
-    constraints: {
-      m: { min: 1, max: 300 },
-      n: { min: 1, max: 300 },
-    },
-    samples: [
-      {
-        input: '4 5\n1 1 1 1 0\n1 1 0 1 0\n1 1 0 0 0\n0 0 0 0 0',
-        output: '1',
-        hidden: false,
-        category: TestCaseCategory.SAMPLE,
-      },
-      {
-        input: '4 5\n1 1 0 0 0\n1 1 0 0 0\n0 0 1 0 0\n0 0 0 1 1',
-        output: '3',
-        hidden: false,
-        category: TestCaseCategory.SAMPLE,
-      },
-      { input: '1 1\n0', output: '0', hidden: true, category: TestCaseCategory.BOUNDARY },
-      { input: '1 1\n1', output: '1', hidden: true, category: TestCaseCategory.BOUNDARY },
-      {
-        input: '2 2\n1 0\n0 1',
-        output: '2',
-        hidden: true,
-        category: TestCaseCategory.EDGE,
-      },
+    statement:
+      'Given a grid of 0s and 1s, output the number of connected islands. Cells connect only vertically and horizontally.',
+    constraints: { m: { min: 1, max: 300 }, n: { min: 1, max: 300 } },
+    visibleCases: [
+      { input: '4 5\n1 1 1 1 0\n1 1 0 1 0\n1 1 0 0 0\n0 0 0 0 0', output: '1', category: TestCaseCategory.SAMPLE },
+      { input: '4 5\n1 1 0 0 0\n1 1 0 0 0\n0 0 1 0 0\n0 0 0 1 1', output: '3', category: TestCaseCategory.SAMPLE },
+      { input: '1 1\n0', output: '0', category: TestCaseCategory.SAMPLE },
+      { input: '1 1\n1', output: '1', category: TestCaseCategory.SAMPLE },
+      { input: '2 2\n1 0\n0 1', output: '2', category: TestCaseCategory.EDGE },
+    ],
+    hiddenCases: [
+      { input: '3 3\n1 1 1\n1 1 1\n1 1 1', output: '1', category: TestCaseCategory.BOUNDARY },
+      { input: '3 3\n0 0 0\n0 0 0\n0 0 0', output: '0', category: TestCaseCategory.BOUNDARY },
+      { input: '3 4\n1 0 1 0\n0 1 0 1\n1 0 1 0', output: '6', category: TestCaseCategory.ADVERSARIAL },
+      { input: '2 3\n1 1 0\n0 1 0', output: '1', category: TestCaseCategory.RANDOM },
+      { input: '5 1\n1\n0\n1\n0\n1', output: '3', category: TestCaseCategory.EDGE },
+      { input: '2 5\n1 0 1 1 0\n1 0 0 1 0', output: '2', category: TestCaseCategory.RANDOM },
+      { input: '4 4\n1 0 0 1\n0 0 0 0\n0 1 1 0\n1 0 0 1', output: '5', category: TestCaseCategory.RANDOM },
+      { input: '3 3\n1 0 1\n1 0 1\n1 0 1', output: '2', category: TestCaseCategory.RANDOM },
+      { input: '4 4\n1 1 0 0\n1 0 0 1\n0 0 1 1\n0 0 0 0', output: '2', category: TestCaseCategory.ADVERSARIAL },
+      { input: '5 5\n1 0 1 0 1\n0 1 0 1 0\n1 0 1 0 1\n0 1 0 1 0\n1 0 1 0 1', output: '13', category: TestCaseCategory.STRESS },
     ],
   },
   {
     title: 'Trapping Rain Water',
+    slug: 'trapping-rain-water',
     difficulty: Difficulty.HARD,
-    tags: ['arrays', 'two-pointers', 'stack', 'dynamic-programming'],
+    tags: ['arrays', 'two-pointers', 'stack'],
     timeLimitMs: 1000,
     memoryLimitMb: 256,
-    statement: `Given \`n\` non-negative integers representing an elevation map where the width of each bar is 1, compute how much water it can trap after raining.
-
-**Input format:**
-- Line 1: Integer \`n\`
-- Line 2: \`n\` space-separated non-negative integers
-
-**Output format:** A single integer — the total units of water trapped.`,
-    constraints: {
-      n: { min: 1, max: 100000 },
-      height_elements: { min: 0, max: 100000 },
-    },
-    samples: [
-      { input: '12\n0 1 0 2 1 0 1 3 2 1 2 1', output: '6', hidden: false, category: TestCaseCategory.SAMPLE },
-      { input: '6\n4 2 0 3 2 5', output: '9', hidden: false, category: TestCaseCategory.SAMPLE },
-      { input: '1\n5', output: '0', hidden: true, category: TestCaseCategory.BOUNDARY },
-      { input: '2\n3 4', output: '0', hidden: true, category: TestCaseCategory.EDGE },
-      { input: '5\n0 0 0 0 0', output: '0', hidden: true, category: TestCaseCategory.EDGE },
-      { input: '5\n3 0 0 0 3', output: '9', hidden: true, category: TestCaseCategory.RANDOM },
+    statement:
+      'Given an elevation map represented by bar heights, compute the total amount of water trapped after raining.',
+    constraints: { n: { min: 1, max: 200000 } },
+    visibleCases: [
+      { input: '12\n0 1 0 2 1 0 1 3 2 1 2 1', output: '6', category: TestCaseCategory.SAMPLE },
+      { input: '6\n4 2 0 3 2 5', output: '9', category: TestCaseCategory.SAMPLE },
+      { input: '1\n5', output: '0', category: TestCaseCategory.SAMPLE },
+      { input: '2\n3 4', output: '0', category: TestCaseCategory.EDGE },
+      { input: '5\n3 0 0 0 3', output: '9', category: TestCaseCategory.RANDOM },
+    ],
+    hiddenCases: [
+      { input: '5\n0 0 0 0 0', output: '0', category: TestCaseCategory.BOUNDARY },
+      { input: '5\n5 4 3 2 1', output: '0', category: TestCaseCategory.EDGE },
+      { input: '5\n1 2 3 4 5', output: '0', category: TestCaseCategory.EDGE },
+      { input: '7\n2 0 2 0 2 0 2', output: '6', category: TestCaseCategory.RANDOM },
+      { input: '8\n5 2 1 2 1 5 2 1', output: '14', category: TestCaseCategory.ADVERSARIAL },
+      { input: '3\n2 0 2', output: '2', category: TestCaseCategory.BOUNDARY },
+      { input: '6\n2 1 0 1 3 2', output: '4', category: TestCaseCategory.RANDOM },
+      { input: '10\n4 2 0 3 2 5 1 0 1 3', output: '14', category: TestCaseCategory.STRESS },
+      { input: '4\n9 0 0 9', output: '18', category: TestCaseCategory.RANDOM },
+      { input: '5\n1 0 1 0 1', output: '2', category: TestCaseCategory.RANDOM },
     ],
   },
   {
     title: 'Word Break',
+    slug: 'word-break',
     difficulty: Difficulty.HARD,
-    tags: ['dynamic-programming', 'strings', 'hash-map', 'trie'],
+    tags: ['dynamic-programming', 'strings', 'hash-map'],
     timeLimitMs: 1000,
     memoryLimitMb: 256,
-    statement: `Given a string \`s\` and a dictionary of strings \`wordDict\`, return \`true\` if \`s\` can be segmented into a space-separated sequence of one or more dictionary words.
-
-Note that the same word in the dictionary may be reused multiple times in the segmentation.
-
-**Input format:**
-- Line 1: String \`s\`
-- Line 2: Integer \`k\` (dictionary size)
-- Line 3: \`k\` space-separated words
-
-**Output format:** \`true\` or \`false\``,
-    constraints: {
-      s_length: { min: 1, max: 300 },
-      wordDict_size: { min: 1, max: 1000 },
-      word_length: { min: 1, max: 20 },
-    },
-    samples: [
-      { input: 'leetcode\n2\nleet code', output: 'true', hidden: false, category: TestCaseCategory.SAMPLE },
-      { input: 'applepenapple\n2\napple pen', output: 'true', hidden: false, category: TestCaseCategory.SAMPLE },
-      { input: 'catsandog\n5\ncats dog sand and cat', output: 'false', hidden: true, category: TestCaseCategory.RANDOM },
-      { input: 'a\n1\na', output: 'true', hidden: true, category: TestCaseCategory.BOUNDARY },
-      { input: 'aaaaaaaaaaaab\n2\na aa', output: 'false', hidden: true, category: TestCaseCategory.ADVERSARIAL },
+    statement:
+      'Given a string and a dictionary, output true if the string can be segmented into one or more dictionary words, otherwise false.',
+    constraints: { sLength: { min: 1, max: 300 }, dictionarySize: { min: 1, max: 1000 } },
+    visibleCases: [
+      { input: 'leetcode\n2\nleet code', output: 'true', category: TestCaseCategory.SAMPLE },
+      { input: 'applepenapple\n2\napple pen', output: 'true', category: TestCaseCategory.SAMPLE },
+      { input: 'catsandog\n5\ncats dog sand and cat', output: 'false', category: TestCaseCategory.SAMPLE },
+      { input: 'a\n1\na', output: 'true', category: TestCaseCategory.SAMPLE },
+      { input: 'cars\n3\ncar ca rs', output: 'true', category: TestCaseCategory.RANDOM },
+    ],
+    hiddenCases: [
+      { input: 'aaaaaaa\n2\na aaa', output: 'true', category: TestCaseCategory.RANDOM },
+      { input: 'pineapplepenapple\n3\napple pen pineapple', output: 'true', category: TestCaseCategory.RANDOM },
+      { input: 'catsanddog\n5\ncats dog sand and cat', output: 'true', category: TestCaseCategory.RANDOM },
+      { input: 'aaaaaaaaaaaab\n2\na aa', output: 'false', category: TestCaseCategory.ADVERSARIAL },
+      { input: 'hello\n2\nhell world', output: 'false', category: TestCaseCategory.EDGE },
+      { input: 'enterapotentpot\n5\na p ent enter ot', output: 'true', category: TestCaseCategory.ADVERSARIAL },
+      { input: 'aaaaab\n3\na aa aaa', output: 'false', category: TestCaseCategory.RANDOM },
+      { input: 'programming\n3\npro gram ming', output: 'true', category: TestCaseCategory.RANDOM },
+      { input: 'zzzz\n1\nz', output: 'true', category: TestCaseCategory.BOUNDARY },
+      { input: 'abcd\n2\na abc', output: 'false', category: TestCaseCategory.EDGE },
     ],
   },
 ];
 
-// ─── Main seed function ────────────────────────────────────────────────────────
+async function ensureIndexes(sqlClient: postgres.Sql) {
+  await sqlClient`CREATE INDEX IF NOT EXISTS idx_submissions_user_id ON submissions(user_id);`;
+  await sqlClient`CREATE INDEX IF NOT EXISTS idx_submissions_problem_id ON submissions(problem_id);`;
+  await sqlClient`CREATE INDEX IF NOT EXISTS idx_test_cases_problem_id ON test_cases(problem_id);`;
+  await sqlClient`CREATE INDEX IF NOT EXISTS idx_problems_slug ON problems(slug);`;
+}
 
-async function seed() {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
+async function seedUsers(db: ReturnType<typeof drizzle<typeof schema>>) {
+  const passwordRounds = Number(process.env.BCRYPT_ROUNDS ?? 12);
+  const userSeeds = [
+    {
+      username: 'admin',
+      email: 'admin@codeforge.local',
+      role: UserRole.PLATFORM_ADMIN,
+      password: 'Admin@123',
+      rating: 2400,
+    },
+    {
+      username: 'setter',
+      email: 'setter@codeforge.local',
+      role: UserRole.PROBLEM_SETTER,
+      password: 'Setter@123',
+      rating: 1600,
+    },
+    {
+      username: 'testuser',
+      email: 'user@codeforge.local',
+      role: UserRole.USER,
+      password: 'User@123',
+      rating: 1200,
+    },
+  ] as const;
+
+  for (const userSeed of userSeeds) {
+    await db
+      .insert(users)
+      .values({
+        username: userSeed.username,
+        email: userSeed.email,
+        passwordHash: await bcrypt.hash(userSeed.password, passwordRounds),
+        role: userSeed.role,
+        isVerified: true,
+        rating: userSeed.rating,
+      })
+      .onConflictDoNothing();
+  }
+
+  const [admin] = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, 'admin@codeforge.local'))
+    .limit(1);
+
+  if (!admin) {
+    throw new Error('Admin user could not be loaded after seeding');
+  }
+
+  return admin;
+}
+
+async function seedProblemsData(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  adminId: string,
+) {
+  for (const problemSeed of seedProblems) {
+    await db
+      .insert(problems)
+      .values({
+        title: problemSeed.title,
+        slug: problemSeed.slug,
+        statement: problemSeed.statement,
+        difficulty: problemSeed.difficulty,
+        constraints: problemSeed.constraints,
+        tags: problemSeed.tags,
+        timeLimitMs: problemSeed.timeLimitMs,
+        memoryLimitMb: problemSeed.memoryLimitMb,
+        isSpecialJudge: false,
+        isPublished: true,
+        createdBy: adminId,
+        aiConfidence: 0.98,
+      })
+      .onConflictDoNothing();
+
+    const [problem] = await db
+      .select()
+      .from(problems)
+      .where(eq(problems.slug, problemSeed.slug))
+      .limit(1);
+
+    if (!problem) {
+      throw new Error(`Problem ${problemSeed.slug} could not be loaded after seeding`);
+    }
+
+    const existingCases = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(testCases)
+      .where(eq(testCases.problemId, problem.id));
+
+    if (Number(existingCases[0]?.count ?? 0) > 0) {
+      continue;
+    }
+
+    const allCases = [
+      ...problemSeed.visibleCases.map((testCase) => ({
+        problemId: problem.id,
+        input: testCase.input,
+        expectedOutput: testCase.output,
+        isHidden: false,
+        category: testCase.category,
+        createdBy: 'human',
+      })),
+      ...problemSeed.hiddenCases.map((testCase) => ({
+        problemId: problem.id,
+        input: testCase.input,
+        expectedOutput: testCase.output,
+        isHidden: true,
+        category: testCase.category,
+        createdBy: 'human',
+      })),
+    ];
+
+    await db.insert(testCases).values(allCases);
+  }
+}
+
+async function main() {
+  if (!process.env.DATABASE_URL) {
     throw new Error('DATABASE_URL environment variable is not set. Copy .env.example to .env first.');
   }
 
-  const sql = postgres(connectionString, { max: 1 });
-  const db = drizzle(sql, { schema });
+  const sqlClient = postgres(process.env.DATABASE_URL, { max: 1 });
+  const db = drizzle(sqlClient, { schema });
 
-  console.log('🌱 Starting seed...\n');
+  console.log('Seeding CodeForge AI database...');
 
-  // ── 1. Users ────────────────────────────────────────────────────────────────
+  const admin = await seedUsers(db);
+  await seedProblemsData(db, admin.id);
+  await ensureIndexes(sqlClient);
 
-  const SALT_ROUNDS = 12;
+  const [userCount, problemCount, testCaseCount] = await Promise.all([
+    db.select({ count: sql<number>`count(*)` }).from(users),
+    db.select({ count: sql<number>`count(*)` }).from(problems),
+    db.select({ count: sql<number>`count(*)` }).from(testCases),
+  ]);
 
-  const [adminUser] = await db
-    .insert(users)
-    .values({
-      username: 'admin',
-      email: 'admin@codeforge.dev',
-      passwordHash: await bcrypt.hash('Admin@1234', SALT_ROUNDS),
-      role: UserRole.PLATFORM_ADMIN,
-      isVerified: true,
-      rating: 2500,
-    })
-    .onConflictDoNothing()
-    .returning();
+  console.log(`Users: ${Number(userCount[0]?.count ?? 0)}`);
+  console.log(`Problems: ${Number(problemCount[0]?.count ?? 0)}`);
+  console.log(`Test cases: ${Number(testCaseCount[0]?.count ?? 0)}`);
+  console.log('Admin login: admin@codeforge.local / Admin@123');
+  console.log('Setter login: setter@codeforge.local / Setter@123');
+  console.log('User login: user@codeforge.local / User@123');
 
-  const [testUser] = await db
-    .insert(users)
-    .values({
-      username: 'testuser',
-      email: 'test@codeforge.dev',
-      passwordHash: await bcrypt.hash('Test@1234', SALT_ROUNDS),
-      role: UserRole.USER,
-      isVerified: true,
-      rating: 1200,
-    })
-    .onConflictDoNothing()
-    .returning();
-
-  if (!adminUser || !testUser) {
-    console.log('⚠️  Users already exist — skipping problem seed to avoid duplicates.');
-    await sql.end();
-    return;
-  }
-
-  console.log(`✅ Created users: ${adminUser.username}, ${testUser.username}`);
-
-  // ── 2. Problems + test cases ─────────────────────────────────────────────────
-
-  for (const p of SEED_PROBLEMS) {
-    const [problem] = await db
-      .insert(problems)
-      .values({
-        title: p.title,
-        slug: slug(p.title),
-        statement: p.statement,
-        difficulty: p.difficulty,
-        constraints: p.constraints,
-        tags: p.tags,
-        timeLimitMs: p.timeLimitMs,
-        memoryLimitMb: p.memoryLimitMb,
-        isSpecialJudge: false,
-        isPublished: true,
-        createdBy: adminUser.id,
-        aiConfidence: 0.97,
-      })
-      .returning();
-
-    await db.insert(testCases).values(
-      p.samples.map((s) => ({
-        problemId: problem.id,
-        input: s.input,
-        expectedOutput: s.output,
-        isHidden: s.hidden,
-        category: s.category,
-        createdBy: 'human',
-      })),
-    );
-
-    console.log(`  📝 ${p.difficulty.padEnd(6)} ${p.title} (${p.samples.length} test cases)`);
-  }
-
-  // ── 3. Sample submission with AI review ──────────────────────────────────────
-
-  const [firstProblem] = await db.select().from(problems).limit(1);
-
-  const [sampleSubmission] = await db
-    .insert(submissions)
-    .values({
-      userId: testUser.id,
-      problemId: firstProblem.id,
-      language: Language.PYTHON,
-      code: [
-        'from typing import List',
-        '',
-        'def two_sum(nums: List[int], target: int) -> List[int]:',
-        '    seen = {}',
-        '    for i, n in enumerate(nums):',
-        '        complement = target - n',
-        '        if complement in seen:',
-        '            return [seen[complement], i]',
-        '        seen[n] = i',
-        '    return []',
-        '',
-        'n, target = map(int, input().split())',
-        'nums = list(map(int, input().split()))',
-        'result = two_sum(nums, target)',
-        'print(*result)',
-      ].join('\n'),
-      verdict: Verdict.AC,
-      runtimeMs: 48,
-      memoryKb: 14432,
-      testCasesPassed: 5,
-      totalTestCases: 5,
-    })
-    .returning();
-
-  const [review] = await db
-    .insert(aiReviews)
-    .values({
-      submissionId: sampleSubmission.id,
-      timeComplexity: 'O(n)',
-      spaceComplexity: 'O(n)',
-      correctnessNotes: 'Solution is correct. Uses a hash map to achieve O(n) time by storing complements.',
-      optimizationHint: 'This is already optimal. A brute-force O(n²) approach exists but is unnecessary here.',
-      dryRun: 'Input: [2,7,11,15], target=9\n→ i=0, n=2, complement=7, seen={}\n→ i=1, n=7, complement=2, found at seen[2]=0\n→ return [0, 1]',
-      qualityScore: 0.95,
-    })
-    .returning();
-
-  // Link the review back to the submission
-  await db
-    .update(submissions)
-    .set({ aiReviewId: review.id })
-    .where(eq(submissions.id, sampleSubmission.id));
-
-  console.log(`\n✅ Sample submission + AI review created for "${firstProblem.title}"`);
-
-  // ── Summary ──────────────────────────────────────────────────────────────────
-
-  console.log('\n─────────────────────────────────────────────');
-  console.log('🎉 Seed complete!');
-  console.log('');
-  console.log('  Admin     admin@codeforge.dev   / Admin@1234');
-  console.log('  Test user test@codeforge.dev    / Test@1234');
-  console.log(`  Problems  ${SEED_PROBLEMS.length} published problems`);
-  console.log('─────────────────────────────────────────────\n');
-
-  await sql.end();
+  await sqlClient.end();
 }
 
-seed().catch((err) => {
-  console.error('❌ Seed failed:', err);
+void main().catch((error) => {
+  console.error('Seed failed:', error);
   process.exit(1);
 });

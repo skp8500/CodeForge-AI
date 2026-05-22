@@ -1,40 +1,50 @@
-# Local development — postgres + redis only.
-# Run the apps with `pnpm dev` (hot-reload) outside of Docker.
-# See `make dev` for the one-command shortcut.
+version: '3.9'
 
 services:
   postgres:
     image: postgres:16-alpine
+    container_name: codeforge-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: codeforge
       POSTGRES_PASSWORD: devpassword
       POSTGRES_DB: codeforge
     ports:
-      - "5432:5432"
+      - '5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U codeforge -d codeforge"]
+      test: ['CMD-SHELL', 'pg_isready -U codeforge']
       interval: 5s
       timeout: 5s
       retries: 10
-      start_period: 10s
 
   redis:
     image: redis:7-alpine
+    container_name: codeforge-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --loglevel warning
     ports:
-      - "6379:6379"
+      - '6379:6379'
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
-      timeout: 5s
+      timeout: 3s
       retries: 10
-      start_period: 5s
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: codeforge-redis-ui
+    restart: unless-stopped
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - '8081:8081'
+    depends_on:
+      redis:
+        condition: service_healthy
 
 volumes:
   postgres_data:

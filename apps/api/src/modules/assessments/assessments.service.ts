@@ -24,6 +24,7 @@ import {
   submissions,
 } from '@codeforge/db';
 import type { Db } from '@codeforge/db';
+import { AssessmentFlagType } from '@codeforge/shared';
 
 import { DB_TOKEN } from '../../database/database.module';
 import { MailService } from '../../mail/mail.service';
@@ -110,7 +111,9 @@ export class AssessmentsService {
       .limit(1);
 
     const frontendUrl =
-      this.config.get<string>('NEXT_PUBLIC_URL') ?? 'http://localhost:3000';
+      this.config.get<string>('NEXT_PUBLIC_APP_URL') ??
+      this.config.get<string>('NEXT_PUBLIC_URL') ??
+      'http://localhost:3000';
 
     let invited = 0;
     let alreadyInvited = 0;
@@ -341,7 +344,7 @@ export class AssessmentsService {
   async logFlag(sessionId: string, dto: LogFlagDto) {
     await this.db.insert(candidateFlags).values({
       sessionId,
-      type: dto.type as 'tab_switch' | 'paste',
+      type: dto.type === 'tab_switch' ? AssessmentFlagType.TAB_SWITCH : AssessmentFlagType.PASTE,
       metadata: dto.metadata ?? null,
     });
 

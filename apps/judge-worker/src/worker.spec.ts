@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import { Language, Verdict, QUEUE_NAMES } from '@codeforge/shared';
 
 import type { ExecutionResult } from './executor/executor.types.js';
-import { createWorkers, type WorkerHandle } from './worker.js';
+import { createWorkers, type WorkerHandle } from './queue-worker.js';
 
 // ─── Unit: pure logger (no Redis) ─────────────────────────────────────────────
 

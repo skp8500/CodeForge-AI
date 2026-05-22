@@ -4,6 +4,7 @@ import { Test } from '@nestjs/testing';
 import { Language, QUEUE_NAMES } from '@codeforge/shared';
 
 import { DB_TOKEN } from '../../database/database.module';
+import { REDIS_TOKEN } from '../../redis/redis.module';
 import { JudgeService } from './judge.service';
 import {
   CONTEST_QUEUE_TOKEN,
@@ -74,16 +75,19 @@ describe('JudgeService', () => {
   let db: ReturnType<typeof buildDbMock>;
   let contestQueue: ReturnType<typeof buildQueueMock>;
   let practiceQueue: ReturnType<typeof buildQueueMock>;
+  let redis: { publish: jest.Mock };
 
   beforeEach(async () => {
     db = buildDbMock();
     contestQueue = buildQueueMock();
     practiceQueue = buildQueueMock();
+    redis = { publish: jest.fn().mockResolvedValue(1) };
 
     const module = await Test.createTestingModule({
       providers: [
         JudgeService,
         { provide: DB_TOKEN, useValue: db },
+        { provide: REDIS_TOKEN, useValue: redis },
         { provide: CONTEST_QUEUE_TOKEN, useValue: contestQueue },
         { provide: PRACTICE_QUEUE_TOKEN, useValue: practiceQueue },
       ],

@@ -6,7 +6,11 @@ import Docker from 'dockerode';
 
 import { MAX_OUTPUT_BYTES } from '../constants.js';
 
-export const docker = new Docker();
+const dockerSocketPath =
+  process.env['DOCKER_SOCKET_PATH'] ||
+  (process.platform === 'win32' ? '//./pipe/docker_engine' : '/var/run/docker.sock');
+
+export const docker = new Docker({ socketPath: dockerSocketPath });
 
 export const WORK_BASE = process.env['WORK_DIR'] ?? '/tmp/codeforge';
 

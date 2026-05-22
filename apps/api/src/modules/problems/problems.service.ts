@@ -236,7 +236,7 @@ export class ProblemsService {
     const [updated] = await this.db
       .update(problems)
       .set({ isPublished: true, updatedAt: new Date() })
-      .where(and(eq(problems.id, id), eq(problems.authorId, userId)))
+      .where(and(eq(problems.id, id), eq(problems.createdBy, userId)))
       .returning({
         id: problems.id,
         title: problems.title,

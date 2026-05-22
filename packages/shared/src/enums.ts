@@ -7,6 +7,7 @@ export enum Verdict {
   CE = 'CE',
   OLE = 'OLE',
   IE = 'IE',
+  CANCELLED = 'CANCELLED',
 }
 
 export enum Difficulty {

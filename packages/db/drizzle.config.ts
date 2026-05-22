@@ -1,13 +1,13 @@
-import { defineConfig } from 'drizzle-kit';
+import type { Config } from 'drizzle-kit';
+import * as dotenv from 'dotenv';
 
-// drizzle-kit >=0.21 API: dialect + dbCredentials.url (replaces driver + connectionString)
-export default defineConfig({
+dotenv.config({ path: '../../.env' });
+
+export default {
   schema: './src/schema.ts',
-  out: './migrations',
+  out: './drizzle',
   dialect: 'postgresql',
   dbCredentials: {
     url: process.env.DATABASE_URL!,
   },
-  verbose: true,
-  strict: true,
-});
+} satisfies Config;

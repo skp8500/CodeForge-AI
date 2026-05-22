@@ -25,6 +25,7 @@ const VERDICT_PRIORITY: Record<Verdict, number> = {
   [Verdict.OLE]: 5,
   [Verdict.WA]: 6,
   [Verdict.AC]: 7,
+  [Verdict.CANCELLED]: 8,
 };
 
 export function worstVerdict(verdicts: Verdict[]): Verdict {

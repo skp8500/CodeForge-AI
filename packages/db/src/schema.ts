@@ -36,6 +36,7 @@ export const verdictEnum = pgEnum('verdict', [
   Verdict.CE,
   Verdict.OLE,
   Verdict.IE,
+  Verdict.CANCELLED,
 ]);
 
 export const difficultyEnum = pgEnum('difficulty', [

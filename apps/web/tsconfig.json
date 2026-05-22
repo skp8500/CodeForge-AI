@@ -2,10 +2,24 @@
   "extends": "@codeforge/config/tsconfig-next",
   "compilerOptions": {
     "paths": {
-      "@/*": ["./src/*"],
-      "@codeforge/shared": ["../../packages/shared/src"]
-    }
+      "@/*": [
+        "./src/*"
+      ],
+      "@codeforge/shared": [
+        "../../packages/shared/src"
+      ]
+    },
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }

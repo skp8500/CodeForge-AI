@@ -1,4 +1,4 @@
-import { Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Inject, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ConnectedSocket,
@@ -8,6 +8,8 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import IORedis from 'ioredis';
+
+import { REDIS_TOKEN } from '../../redis/redis.module';
 
 @WebSocketGateway({
   namespace: '/ws',
@@ -22,12 +24,13 @@ export class WebsocketGateway implements OnModuleInit, OnModuleDestroy {
   @WebSocketServer()
   server!: any;
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    @Inject(REDIS_TOKEN) private readonly redis: IORedis,
+  ) {}
 
   onModuleInit(): void {
-    this.subscriber = new IORedis(this.config.getOrThrow<string>('REDIS_URL'), {
-      maxRetriesPerRequest: null,
-    });
+    this.subscriber = this.redis.duplicate();
 
     void this.subscriber.psubscribe('submissions:*', (err) => {
       if (err) this.logger.error('Redis psubscribe error', err);

@@ -7,12 +7,22 @@
     "build": "turbo run build",
     "lint": "turbo run lint",
     "test": "turbo run test",
-    "clean": "turbo run clean && rm -rf node_modules",
+    "db:migrate": "turbo run db:migrate --filter=@codeforge/db",
+    "db:seed": "turbo run db:seed --filter=@codeforge/db",
+    "start": "turbo run start --parallel",
+    "env:sync": "powershell -Command \"Copy-Item .env apps/api/.env -Force; Copy-Item .env apps/judge-worker/.env -Force; Copy-Item .env apps/web/.env.local -Force\"",
+    "verify": "tsx scripts/verify-setup.ts",
+    "clean": "turbo run clean && powershell -Command \"if (Test-Path node_modules) { Remove-Item node_modules -Recurse -Force }\"",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\" --ignore-path .gitignore"
   },
   "devDependencies": {
-    "turbo": "^2.0.0",
+    "dockerode": "^4.0.9",
+    "dotenv": "^16.6.1",
+    "ioredis": "^5.8.2",
+    "postgres": "^3.4.7",
     "prettier": "^3.2.5",
+    "tsx": "^4.20.6",
+    "turbo": "^2.0.0",
     "typescript": "^5.4.5"
   },
   "engines": {

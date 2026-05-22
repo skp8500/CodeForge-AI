@@ -1,6 +1,8 @@
-import { io, type Socket } from 'socket.io-client';
+import { io, Socket } from 'socket.io-client';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+import { getAccessToken } from './auth';
+
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001';
 
 // ─── Event data shapes ────────────────────────────────────────────────────────
 
@@ -11,8 +13,8 @@ export interface QueuedData {
 
 export interface ExecutingData {
   submissionId: string;
-  completed: number;
-  total: number;
+  testCasesComplete: number;
+  totalTestCases: number;
 }
 
 export interface VerdictData {
@@ -55,26 +57,39 @@ export interface SubmissionCallbacks {
 
 // ─── Singleton socket ─────────────────────────────────────────────────────────
 
-let _socket: Socket | null = null;
+let socket: Socket | null = null;
+
+export function getSocket(): Socket {
+  if (!socket || socket.disconnected) {
+    const token = getAccessToken();
+    socket = io(`${WS_URL}/judge`, {
+      auth: { token },
+      transports: ['websocket'],
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+    });
+
+    socket.on('connect', () => console.log('WebSocket connected'));
+    socket.on('disconnect', (reason) => console.log('WebSocket disconnected:', reason));
+    socket.on('connect_error', (err) => console.error('WebSocket error:', err.message));
+  }
+
+  return socket;
+}
 
 export function getJudgeSocket(): Socket {
-  if (_socket?.connected) return _socket;
+  return getSocket();
+}
 
-  const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
-
-  _socket = io(`${API_URL}/judge`, {
-    auth: { token },
-    transports: ['websocket'],
-    reconnectionAttempts: 5,
-    reconnectionDelay: 1000,
-  });
-
-  return _socket;
+export function disconnectSocket(): void {
+  if (socket) {
+    socket.disconnect();
+    socket = null;
+  }
 }
 
 export function disconnectJudgeSocket(): void {
-  _socket?.disconnect();
-  _socket = null;
+  disconnectSocket();
 }
 
 // ─── Per-submission subscription ──────────────────────────────────────────────
@@ -83,7 +98,7 @@ export function subscribeToSubmission(
   submissionId: string,
   callbacks: SubmissionCallbacks,
 ): () => void {
-  const socket = getJudgeSocket();
+  const socket = getSocket();
 
   const onQueued = (data: QueuedData) => {
     if (data.submissionId !== submissionId) return;

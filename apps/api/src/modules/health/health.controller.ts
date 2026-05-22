@@ -1,4 +1,4 @@
-import { Controller, Get, HttpCode, HttpStatus, Inject, VERSION_NEUTRAL } from '@nestjs/common';
+import { Controller, Get, HttpCode, HttpStatus, Inject } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { sql } from 'drizzle-orm';
 import type IORedis from 'ioredis';
@@ -11,16 +11,16 @@ import { REDIS_TOKEN } from '../../redis/redis.module';
 
 interface HealthResponse {
   status: 'ok' | 'degraded';
-  checks: {
-    db: boolean;
-    redis: boolean;
-    judgeQueue: { depth: number; reachable: boolean };
-  };
   timestamp: string;
+  services: {
+    database: 'ok' | 'degraded';
+    redis: 'ok' | 'degraded';
+    judgeQueue: { depth: number; status: 'ok' | 'degraded' };
+  };
 }
 
 @ApiTags('Health')
-@Controller({ path: 'health', version: VERSION_NEUTRAL })
+@Controller('health')
 export class HealthController {
   constructor(
     @Inject(DB_TOKEN) private readonly db: Db,
@@ -44,15 +44,15 @@ export class HealthController {
 
     return {
       status: allOk ? 'ok' : 'degraded',
-      checks: {
-        db: dbOk,
-        redis: redisResult.redis,
+      timestamp: new Date().toISOString(),
+      services: {
+        database: dbOk ? 'ok' : 'degraded',
+        redis: redisResult.redis ? 'ok' : 'degraded',
         judgeQueue: {
           depth: redisResult.queueDepth,
-          reachable: redisResult.redis,
+          status: redisResult.redis ? 'ok' : 'degraded',
         },
       },
-      timestamp: new Date().toISOString(),
     };
   }
 

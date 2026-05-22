@@ -69,7 +69,7 @@ export class AuthService {
   async login(
     body: unknown,
     res: Response,
-  ): Promise<{ accessToken: string }> {
+  ): Promise<{ accessToken: string; user: ReturnType<AuthService['serializeUser']> }> {
     const dto = LoginRequestSchema.parse(body);
 
     const user = await this.usersService.findByEmail(dto.email);
@@ -87,7 +87,7 @@ export class AuthService {
     const { accessToken, refreshToken } = await this.generateTokens(user);
     this.setRefreshCookie(res, refreshToken);
 
-    return { accessToken };
+    return { accessToken, user: this.serializeUser(user) };
   }
 
   // ─── Email verification ────────────────────────────────────────────────────
@@ -109,7 +109,10 @@ export class AuthService {
 
     await this.usersService.markVerified(payload.sub);
 
-    const frontendUrl = this.config.getOrThrow<string>('FRONTEND_URL');
+    const frontendUrl =
+      this.config.get<string>('NEXT_PUBLIC_APP_URL') ??
+      this.config.get<string>('FRONTEND_URL') ??
+      'http://localhost:3000';
     return `${frontendUrl}/login?verified=true`;
   }
 
@@ -172,7 +175,10 @@ export class AuthService {
     const { accessToken, refreshToken } = await this.generateTokens(user);
     this.setRefreshCookie(res, refreshToken);
 
-    const frontendUrl = this.config.getOrThrow<string>('FRONTEND_URL');
+    const frontendUrl =
+      this.config.get<string>('NEXT_PUBLIC_APP_URL') ??
+      this.config.get<string>('FRONTEND_URL') ??
+      'http://localhost:3000';
     return `${frontendUrl}/auth/callback?token=${accessToken}`;
   }
 
@@ -223,6 +229,17 @@ export class AuthService {
       sameSite: 'lax' as const,
       maxAge: REFRESH_TTL_SECONDS * 1000,
       path: '/',
+    };
+  }
+
+  private serializeUser(user: UserRow) {
+    return {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      rating: user.rating,
+      isVerified: user.isVerified,
     };
   }
 }

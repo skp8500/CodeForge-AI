@@ -8,6 +8,7 @@ import type { Db } from '@codeforge/db';
 import {
   JUDGE_EVENTS_CHANNEL,
   QUEUE_NAMES,
+  Verdict,
   type JudgeEventPayload,
   type SubmissionJob,
 } from '@codeforge/shared';
@@ -139,7 +140,7 @@ export class JudgeService {
   async cancelSubmission(id: string, userId: string): Promise<void> {
     const [updated] = await this.db
       .update(submissions)
-      .set({ verdict: 'CANCELLED' })
+      .set({ verdict: Verdict.CANCELLED })
       .where(and(eq(submissions.id, id), eq(submissions.userId, userId), isNull(submissions.verdict)))
       .returning({ id: submissions.id });
     if (!updated) throw new NotFoundException('Submission not found, already judged, or access denied');

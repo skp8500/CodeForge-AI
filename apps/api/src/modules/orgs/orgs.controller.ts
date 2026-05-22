@@ -75,7 +75,9 @@ export class OrgsController {
     @Req() req: Request,
   ) {
     const frontendUrl =
-      process.env['NEXT_PUBLIC_URL'] ?? `${req.protocol}://${req.get('host')}`.replace(':3001', ':3000');
+      process.env['NEXT_PUBLIC_APP_URL'] ??
+      process.env['NEXT_PUBLIC_URL'] ??
+      `${req.protocol}://${req.get('host')}`.replace(':3001', ':3000');
     return this.orgsService.inviteMember(id, body, user.sub, frontendUrl);
   }
 

@@ -1,9 +1,10 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import type { Route } from 'next';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { acceptOrgInvite } from '@/lib/api';
 
-export default function AcceptInvitePage() {
+function AcceptInviteContent() {
   const params = useSearchParams();
   const router = useRouter();
   const token = params.get('token');
@@ -20,9 +21,8 @@ export default function AcceptInvitePage() {
   const handleAccept = async () => {
     if (!token) return;
     if (!isLoggedIn()) {
-      // Save token and redirect to login
       sessionStorage.setItem('pendingInviteToken', token);
-      router.push(`/login?redirect=${encodeURIComponent(`/orgs/accept-invite?token=${token}`)}`);
+      router.push('/' as Route);
       return;
     }
     setPhase('loading');
@@ -79,7 +79,7 @@ export default function AcceptInvitePage() {
             <p className="text-4xl mb-4">🎉</p>
             <p className="text-green-400 font-semibold mb-4">{msg}</p>
             <button
-              onClick={() => router.push(`/orgs/${orgSlug}/dashboard`)}
+              onClick={() => router.push(`/orgs/${orgSlug}` as Route)}
               className="w-full rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white hover:bg-blue-700"
             >
               Go to Dashboard
@@ -100,5 +100,19 @@ export default function AcceptInvitePage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function AcceptInvitePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-screen items-center justify-center bg-gray-950">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+        </div>
+      }
+    >
+      <AcceptInviteContent />
+    </Suspense>
   );
 }

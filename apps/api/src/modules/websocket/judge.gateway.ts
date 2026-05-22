@@ -1,4 +1,4 @@
-import { Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Inject, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import {
@@ -12,10 +12,14 @@ import IORedis from 'ioredis';
 import { JUDGE_EVENTS_CHANNEL, type JudgeEventPayload } from '@codeforge/shared';
 
 import type { JwtAccessPayload } from '../../common/types/jwt-payload.types';
+import { REDIS_TOKEN } from '../../redis/redis.module';
 
 @WebSocketGateway({
   namespace: '/judge',
-  cors: { origin: process.env['NEXT_PUBLIC_URL'] ?? '*', credentials: true },
+  cors: {
+    origin: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:3000'],
+    credentials: true,
+  },
   transports: ['websocket'],
 })
 export class JudgeGateway
@@ -31,14 +35,13 @@ export class JudgeGateway
   constructor(
     private readonly config: ConfigService,
     private readonly jwtService: JwtService,
+    @Inject(REDIS_TOKEN) private readonly redis: IORedis,
   ) {}
 
   // ─── Lifecycle ──────────────────────────────────────────────────────────────
 
   onModuleInit(): void {
-    this.subscriber = new IORedis(this.config.getOrThrow<string>('REDIS_URL'), {
-      maxRetriesPerRequest: null,
-    });
+    this.subscriber = this.redis.duplicate();
 
     void this.subscriber.subscribe(JUDGE_EVENTS_CHANNEL, (err) => {
       if (err) this.logger.error('Redis subscribe error', err);
@@ -52,7 +55,6 @@ export class JudgeGateway
       } catch {
         return;
       }
-      // Emit directly to the owning user's room — no manual subscription needed
       this.server.to(`user:${payload.userId}`).emit(payload.event, payload.data);
     });
   }

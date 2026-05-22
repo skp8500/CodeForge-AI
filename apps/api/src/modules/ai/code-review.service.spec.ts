@@ -192,7 +192,7 @@ describe('CodeReviewService', () => {
       expect(userMsg).toContain(TEST_CASE_ROW.input);
       expect(userMsg).toContain(TEST_CASE_ROW.expectedOutput);
 
-      expect(redis.publish).toHaveBeenCalledTimes(1);
+      expect(redis.publish).toHaveBeenCalledTimes(2);
     });
 
     it('uses TLE prompt with runtime and time limit', async () => {

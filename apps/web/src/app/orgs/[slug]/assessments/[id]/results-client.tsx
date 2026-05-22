@@ -1,4 +1,5 @@
 'use client';
+import type { Route } from 'next';
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { getAssessmentResults, type CandidateResult } from '@/lib/api';
@@ -103,7 +104,7 @@ export function AssessmentResultsClient({ slug, assessmentId }: Props) {
     <div className="min-h-screen bg-gray-950 text-gray-100">
       <div className="border-b border-gray-800 bg-gray-900/60 px-6 py-4">
         <div className="mx-auto max-w-7xl">
-          <Link href={`/orgs/${slug}/dashboard`} className="text-xs text-gray-500 hover:text-gray-300">
+          <Link href={`/orgs/${slug}` as Route} className="text-xs text-gray-500 hover:text-gray-300">
             ← Dashboard
           </Link>
           <h1 className="mt-1 text-xl font-bold">Assessment Results</h1>
