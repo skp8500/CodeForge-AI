@@ -38,11 +38,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const storedToken = getAccessToken();
     const storedUser = getUser();
-    if (storedToken && storedUser) {
-      setTokenState(storedToken);
-      setUserState(storedUser);
+
+    if (!storedToken || !storedUser) {
+      setIsLoading(false);
+      return;
     }
-    setIsLoading(false);
+
+    let cancelled = false;
+
+    void api
+      .get<User>('/auth/me', storedToken)
+      .then(() => {
+        if (cancelled) return;
+        setTokenState(storedToken);
+        setUserState(storedUser as User);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        clearAuth();
+        setTokenState(null);
+        setUserState(null);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const login = async (email: string, password: string) => {

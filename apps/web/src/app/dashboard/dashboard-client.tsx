@@ -2,10 +2,12 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import type { Route } from 'next';
+import { useRouter } from 'next/navigation';
 import { DifficultyBadge } from '@/components/ui/difficulty-badge';
 import { VerdictBadge } from '@/components/ui/verdict-badge';
 import { SubmissionHeatmap } from '@/components/dashboard/heatmap';
 import { TopicChart } from '@/components/dashboard/topic-chart';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   getUserStats,
   getSubmissionHeatmap,
@@ -91,6 +93,8 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 export function DashboardClient() {
+  const router = useRouter();
+  const { logout } = useAuth();
   const navLinks: Array<{ href: Route; label: string; active: boolean }> = [
     { href: '/dashboard', label: '◉  Overview', active: true },
     { href: '/problems', label: '⬡  Problems', active: false },
@@ -141,7 +145,7 @@ export function DashboardClient() {
         <div className="text-center">
           <p className="text-lg font-semibold text-gray-300">Sign in to view your dashboard</p>
           <Link
-            href="/"
+            href="/login?redirect=%2Fdashboard"
             className="mt-4 inline-block rounded-lg bg-brand-600 px-5 py-2 text-sm font-medium text-white hover:bg-brand-700"
           >
             Sign in
@@ -178,7 +182,7 @@ export function DashboardClient() {
         <nav className="flex-1 px-2 py-3 space-y-0.5">
           {navLinks.map(({ href, label, active }) => (
             <Link
-              key={href}
+              key={`${href}-${label}`}
               href={href}
               className={`flex items-center rounded-lg px-3 py-2 text-sm transition-colors ${
                 active
@@ -194,8 +198,9 @@ export function DashboardClient() {
         <div className="border-t border-gray-800 px-4 py-3">
           <button
             onClick={() => {
-              localStorage.removeItem('accessToken');
-              window.location.href = '/';
+              logout();
+              router.replace('/login');
+              router.refresh();
             }}
             className="text-xs text-gray-600 hover:text-gray-400"
           >
