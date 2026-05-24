@@ -1,30 +1,37 @@
 import { Module } from '@nestjs/common';
 import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
-import OpenAI from 'openai';
+import { GoogleGenAI } from '@google/genai';
 
 import { QUEUE_NAMES } from '@codeforge/shared';
 
 import { ConfigService } from '@nestjs/config';
 import { REDIS_TOKEN } from '../../redis/redis.module';
 import { AiController } from './ai.controller';
-import { ProblemsController } from './problems.controller';
-import { OPENAI_CLIENT, ProblemParserService } from './problem-parser.service';
-import { TestGeneratorService } from './test-generator.service';
-import { CodeReviewService } from './code-review.service';
-import { CodeReviewProcessor } from './code-review.processor';
-import { ProblemExplainerService } from './problem-explainer.service';
 import { AI_BULL_CONNECTION_TOKEN, AI_REVIEW_QUEUE_TOKEN } from './code-review.types';
+import { CodeReviewProcessor } from './code-review.processor';
+import { CodeReviewService } from './code-review.service';
+import { DEFAULT_GEMINI_MODEL, GEMINI_CLIENT } from './gemini.client';
+import { ProblemExplainerService } from './problem-explainer.service';
+import { ProblemsController } from './problems.controller';
+import { ProblemParserService } from './problem-parser.service';
+import { TestGeneratorService } from './test-generator.service';
 
 @Module({
   imports: [],
   controllers: [AiController, ProblemsController],
   providers: [
     {
-      provide: OPENAI_CLIENT,
+      provide: GEMINI_CLIENT,
       inject: [ConfigService],
-      useFactory: (config: ConfigService) =>
-        new OpenAI({ apiKey: config.getOrThrow<string>('OPENAI_API_KEY') }),
+      useFactory: (config: ConfigService) => {
+        process.env.GEMINI_MODEL =
+          config.get<string>('GEMINI_MODEL') || process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
+
+        return new GoogleGenAI({
+          apiKey: config.getOrThrow<string>('GEMINI_API_KEY'),
+        });
+      },
     },
 
     {

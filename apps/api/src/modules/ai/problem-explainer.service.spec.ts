@@ -3,7 +3,7 @@ import { Test } from '@nestjs/testing';
 
 import { DB_TOKEN } from '../../database/database.module';
 import { REDIS_TOKEN } from '../../redis/redis.module';
-import { OPENAI_CLIENT } from './problem-parser.service';
+import { GEMINI_CLIENT } from './gemini.client';
 import { ProblemExplainerService } from './problem-explainer.service';
 import { EXPLAIN_RATE_LIMIT, FOLLOWUP_RATE_LIMIT } from './problem-explainer.types';
 
@@ -52,14 +52,12 @@ function buildRedisMock() {
   };
 }
 
-function buildOpenAIMock(content: string) {
+function buildGeminiMock(content: string) {
   return {
-    chat: {
-      completions: {
-        create: jest.fn().mockResolvedValue({
-          choices: [{ message: { content } }],
-        }),
-      },
+    models: {
+      generateContent: jest.fn().mockResolvedValue({
+        text: content,
+      }),
     },
   };
 }
@@ -70,19 +68,19 @@ describe('ProblemExplainerService', () => {
   let service: ProblemExplainerService;
   let db: ReturnType<typeof buildDbMock>;
   let redis: ReturnType<typeof buildRedisMock>;
-  let openai: ReturnType<typeof buildOpenAIMock>;
+  let gemini: ReturnType<typeof buildGeminiMock>;
 
   async function buildService(aiContent = 'A clear explanation.') {
     db = buildDbMock();
     redis = buildRedisMock();
-    openai = buildOpenAIMock(aiContent);
+    gemini = buildGeminiMock(aiContent);
 
     const module = await Test.createTestingModule({
       providers: [
         ProblemExplainerService,
         { provide: DB_TOKEN, useValue: db },
         { provide: REDIS_TOKEN, useValue: redis },
-        { provide: OPENAI_CLIENT, useValue: openai },
+        { provide: GEMINI_CLIENT, useValue: gemini },
       ],
     }).compile();
 
@@ -92,7 +90,7 @@ describe('ProblemExplainerService', () => {
   // ─── explainProblem ──────────────────────────────────────────────────────────
 
   describe('explainProblem', () => {
-    it('ELI5: calls OpenAI with 400 max tokens and returns explanation + related problems', async () => {
+    it('ELI5: calls Gemini with 400 max tokens and returns explanation + related problems', async () => {
       await buildService('Imagine you have a bunch of numbers...');
 
       db.limit
@@ -103,8 +101,10 @@ describe('ProblemExplainerService', () => {
 
       expect(result.explanation).toBe('Imagine you have a bunch of numbers...');
       expect(result.relatedProblems).toHaveLength(2);
-      expect(openai.chat.completions.create).toHaveBeenCalledWith(
-        expect.objectContaining({ max_tokens: 400 }),
+      expect(gemini.models.generateContent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: expect.objectContaining({ maxOutputTokens: 400 }),
+        }),
       );
     });
 
@@ -119,12 +119,10 @@ describe('ProblemExplainerService', () => {
       const result = await service.explainProblem(PROBLEM_ID, 'standard', USER_ID);
 
       expect(result.explanation).toBeTruthy();
-      const promptArg = openai.chat.completions.create.mock.calls[0][0];
-      const userMsg = (promptArg.messages as { role: string; content: string }[]).find(
-        (m) => m.role === 'user',
-      )!.content;
+      const promptArg = gemini.models.generateContent.mock.calls[0][0];
+      const userMsg = promptArg.contents as string;
       expect(userMsg).toContain('[1,-2,3]');
-      expect(promptArg.max_tokens).toBe(600);
+      expect(promptArg.config.maxOutputTokens).toBe(600);
     });
 
     it('expert: passes constraints in prompt with 800 max tokens', async () => {
@@ -137,8 +135,8 @@ describe('ProblemExplainerService', () => {
       const result = await service.explainProblem(PROBLEM_ID, 'expert', USER_ID);
 
       expect(result.explanation).toContain('DP problem');
-      const promptArg = openai.chat.completions.create.mock.calls[0][0];
-      expect(promptArg.max_tokens).toBe(800);
+      const promptArg = gemini.models.generateContent.mock.calls[0][0];
+      expect(promptArg.config.maxOutputTokens).toBe(800);
     });
 
     it('throws NotFoundException when problem does not exist', async () => {
@@ -148,7 +146,7 @@ describe('ProblemExplainerService', () => {
       await expect(service.explainProblem(PROBLEM_ID, 'eli5', USER_ID)).rejects.toThrow(
         NotFoundException,
       );
-      expect(openai.chat.completions.create).not.toHaveBeenCalled();
+      expect(gemini.models.generateContent).not.toHaveBeenCalled();
     });
 
     it(`throws 429 when user exceeds ${EXPLAIN_RATE_LIMIT} explanations/hour`, async () => {
@@ -245,7 +243,7 @@ describe('ProblemExplainerService', () => {
   // ─── explainFollowup ──────────────────────────────────────────────────────────
 
   describe('explainFollowup', () => {
-    it('calls OpenAI with last 6 messages from history and returns answer', async () => {
+    it('calls Gemini with last 6 messages from history and returns answer', async () => {
       await buildService('Try using Kadane\'s algorithm.');
 
       db.limit.mockResolvedValueOnce([PROBLEM_ROW]);
@@ -262,10 +260,9 @@ describe('ProblemExplainerService', () => {
       );
 
       expect(result.answer).toBe("Try using Kadane's algorithm.");
-      const promptArg = openai.chat.completions.create.mock.calls[0][0];
-      const messages = promptArg.messages as { role: string }[];
-      // system + 6 history + 1 question = 8 messages
-      expect(messages).toHaveLength(8);
+      const promptArg = gemini.models.generateContent.mock.calls[0][0];
+      const contents = promptArg.contents as Array<{ role: string }>;
+      expect(contents).toHaveLength(7);
     });
 
     it(`throws 429 after ${FOLLOWUP_RATE_LIMIT} follow-up questions`, async () => {

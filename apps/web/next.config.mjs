@@ -1,3 +1,14 @@
+const r2PublicUrl = process.env.R2_PUBLIC_URL;
+const r2Hostname = (() => {
+  if (!r2PublicUrl) return null;
+
+  try {
+    return new URL(r2PublicUrl).hostname;
+  } catch {
+    return null;
+  }
+})();
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
@@ -17,7 +28,7 @@ const nextConfig = {
   images: {
     remotePatterns: [
       { protocol: 'http', hostname: 'localhost' },
-      { protocol: 'https', hostname: '*.amazonaws.com' },
+      ...(r2Hostname ? [{ protocol: 'https', hostname: r2Hostname }] : []),
     ],
   },
 };

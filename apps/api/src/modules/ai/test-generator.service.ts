@@ -2,8 +2,8 @@ import { spawn } from 'child_process';
 import { createHash } from 'crypto';
 
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import type { GoogleGenAI } from '@google/genai';
 import { and, eq } from 'drizzle-orm';
-import type OpenAI from 'openai';
 
 import { problems, testCases } from '@codeforge/db';
 import type { Db } from '@codeforge/db';
@@ -11,11 +11,11 @@ import type { Db } from '@codeforge/db';
 import { TestCaseCategory } from '@codeforge/shared';
 
 import { DB_TOKEN } from '../../database/database.module';
-import { OPENAI_CLIENT } from './problem-parser.service';
+import { GEMINI_CLIENT, getGeminiModel, getGeminiText } from './gemini.client';
 import {
-  BRUTEFORCE_OPENAI_JSON_SCHEMA,
+  BRUTEFORCE_JSON_SCHEMA,
   CATEGORY_HIDDEN,
-  TESTCASE_OPENAI_JSON_SCHEMA,
+  TESTCASE_JSON_SCHEMA,
   RawBruteForceResponseSchema,
   RawTestCaseResponseSchema,
   buildBruteForcePrompt,
@@ -33,7 +33,7 @@ export class TestGeneratorService {
   private readonly logger = new Logger(TestGeneratorService.name);
 
   constructor(
-    @Inject(OPENAI_CLIENT) private readonly openai: OpenAI,
+    @Inject(GEMINI_CLIENT) private readonly gemini: GoogleGenAI,
     @Inject(DB_TOKEN) private readonly db: Db,
   ) {}
 
@@ -150,30 +150,24 @@ export class TestGeneratorService {
   ): Promise<RawTestCase[]> {
     let rawContent: string;
     try {
-      const completion = await this.openai.chat.completions.create({
-        model: 'gpt-4o',
-        temperature: 0.2,
-        response_format: {
-          type: 'json_schema',
-          json_schema: {
-            name: 'TestCaseList',
-            strict: true,
-            schema: TESTCASE_OPENAI_JSON_SCHEMA,
-          },
+      const response = await this.gemini.models.generateContent({
+        model: getGeminiModel(),
+        contents: buildCategoryPrompt(category, problem, seed),
+        config: {
+          temperature: 0.2,
+          responseMimeType: 'application/json',
+          responseJsonSchema: TESTCASE_JSON_SCHEMA,
+          systemInstruction: buildSystemPrompt(problem),
         },
-        messages: [
-          { role: 'system', content: buildSystemPrompt(problem) },
-          { role: 'user', content: buildCategoryPrompt(category, problem, seed) },
-        ],
       });
-      rawContent = completion.choices[0]?.message?.content ?? '';
+      rawContent = getGeminiText(response);
     } catch (err) {
-      this.logger.warn(`OpenAI call for ${category} failed: ${errorMessage(err)}`);
+      this.logger.warn(`Gemini call for ${category} failed: ${errorMessage(err)}`);
       return [];
     }
 
     if (!rawContent.trim()) {
-      this.logger.warn(`Empty OpenAI response for category ${category}`);
+      this.logger.warn(`Empty Gemini response for category ${category}`);
       return [];
     }
 
@@ -199,27 +193,18 @@ export class TestGeneratorService {
   private async getBruteForce(problem: ProblemRow): Promise<string | null> {
     let rawContent: string;
     try {
-      const completion = await this.openai.chat.completions.create({
-        model: 'gpt-4o',
-        temperature: 0.1,
-        response_format: {
-          type: 'json_schema',
-          json_schema: {
-            name: 'BruteForce',
-            strict: true,
-            schema: BRUTEFORCE_OPENAI_JSON_SCHEMA,
-          },
+      const response = await this.gemini.models.generateContent({
+        model: getGeminiModel(),
+        contents: buildBruteForcePrompt(problem),
+        config: {
+          temperature: 0.1,
+          responseMimeType: 'application/json',
+          responseJsonSchema: BRUTEFORCE_JSON_SCHEMA,
+          systemInstruction:
+            'You are an expert competitive programmer. Generate a correct Python 3 solution that reads from stdin and writes to stdout. Return JSON with pythonCode and explanation fields.',
         },
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are an expert competitive programmer. Generate a correct Python 3 solution that reads from stdin and writes to stdout. Return JSON with pythonCode and explanation fields.',
-          },
-          { role: 'user', content: buildBruteForcePrompt(problem) },
-        ],
       });
-      rawContent = completion.choices[0]?.message?.content ?? '';
+      rawContent = getGeminiText(response);
     } catch (err) {
       this.logger.warn(`Brute-force generation failed: ${errorMessage(err)}`);
       return null;

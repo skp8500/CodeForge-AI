@@ -7,8 +7,8 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import type { Content, GoogleGenAI } from '@google/genai';
 import { and, eq, ne, sql } from 'drizzle-orm';
-import type OpenAI from 'openai';
 import type IORedis from 'ioredis';
 
 import { problems, testCases } from '@codeforge/db';
@@ -16,7 +16,7 @@ import type { Db } from '@codeforge/db';
 
 import { DB_TOKEN } from '../../database/database.module';
 import { REDIS_TOKEN } from '../../redis/redis.module';
-import { OPENAI_CLIENT } from './problem-parser.service';
+import { GEMINI_CLIENT, getGeminiModel, getGeminiText } from './gemini.client';
 import {
   EXPLAIN_RATE_LIMIT,
   FOLLOWUP_RATE_LIMIT,
@@ -45,7 +45,7 @@ export class ProblemExplainerService {
   constructor(
     @Inject(DB_TOKEN) private readonly db: Db,
     @Inject(REDIS_TOKEN) private readonly redis: IORedis,
-    @Inject(OPENAI_CLIENT) private readonly openai: OpenAI,
+    @Inject(GEMINI_CLIENT) private readonly gemini: GoogleGenAI,
   ) {}
 
   // ─── POST /ai/explain-problem ─────────────────────────────────────────────
@@ -70,7 +70,7 @@ export class ProblemExplainerService {
     }
 
     const { systemPrompt, userPrompt } = buildExplanationPrompt(level, problem, samples);
-    const explanation = await this.callOpenAI(systemPrompt, userPrompt, MAX_TOKENS[level]);
+    const explanation = await this.callGemini(systemPrompt, userPrompt, MAX_TOKENS[level]);
 
     const relatedProblems = await this.fetchRelatedProblems(
       problemId,
@@ -144,29 +144,31 @@ export class ProblemExplainerService {
       `Problem context: ${problem.statement}`,
     ].join('\n');
 
-    const messages: OpenAI.ChatCompletionMessageParam[] = [
-      { role: 'system', content: systemPrompt },
+    const contents: Content[] = [
       ...recentHistory.map((m) => ({
-        role: m.role as 'user' | 'assistant',
-        content: m.content,
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }],
       })),
-      { role: 'user', content: question },
+      { role: 'user', parts: [{ text: question }] },
     ];
 
     let rawContent: string;
     try {
-      const completion = await this.openai.chat.completions.create({
-        model: 'gpt-4o',
-        temperature: 0.3,
-        max_tokens: 600,
-        messages,
+      const response = await this.gemini.models.generateContent({
+        model: getGeminiModel(),
+        contents,
+        config: {
+          temperature: 0.3,
+          maxOutputTokens: 600,
+          systemInstruction: systemPrompt,
+        },
       });
-      rawContent = completion.choices[0]?.message?.content ?? '';
+      rawContent = getGeminiText(response);
     } catch (err) {
-      throw new Error(`OpenAI API error: ${errorMessage(err)}`);
+      throw new Error(`Gemini API error: ${errorMessage(err)}`);
     }
 
-    if (!rawContent.trim()) throw new Error('OpenAI returned empty response');
+    if (!rawContent.trim()) throw new Error('Gemini returned empty response');
     return { answer: rawContent };
   }
 
@@ -229,26 +231,26 @@ export class ProblemExplainerService {
 
     let rawContent: string;
     try {
-      const completion = await this.openai.chat.completions.create({
-        model: 'gpt-4o',
-        temperature: 0.3,
-        max_tokens: 600,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: problemStatement },
-        ],
+      const response = await this.gemini.models.generateContent({
+        model: getGeminiModel(),
+        contents: problemStatement,
+        config: {
+          temperature: 0.3,
+          maxOutputTokens: 600,
+          responseMimeType: 'application/json',
+          systemInstruction: systemPrompt,
+        },
       });
-      rawContent = completion.choices[0]?.message?.content ?? '';
+      rawContent = getGeminiText(response);
     } catch (err) {
-      throw new Error(`OpenAI API error: ${errorMessage(err)}`);
+      throw new Error(`Gemini API error: ${errorMessage(err)}`);
     }
 
     let rawJson: unknown;
     try {
       rawJson = JSON.parse(rawContent);
     } catch {
-      throw new Error('OpenAI returned invalid JSON for hints');
+      throw new Error('Gemini returned invalid JSON for hints');
     }
 
     const parsed = HintsResponseSchema.safeParse(rawJson);
@@ -259,28 +261,28 @@ export class ProblemExplainerService {
     return parsed.data.hints;
   }
 
-  private async callOpenAI(
+  private async callGemini(
     systemPrompt: string,
     userPrompt: string,
     maxTokens: number,
   ): Promise<string> {
     let content: string;
     try {
-      const completion = await this.openai.chat.completions.create({
-        model: 'gpt-4o',
-        temperature: 0.3,
-        max_tokens: maxTokens,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
+      const response = await this.gemini.models.generateContent({
+        model: getGeminiModel(),
+        contents: userPrompt,
+        config: {
+          temperature: 0.3,
+          maxOutputTokens: maxTokens,
+          systemInstruction: systemPrompt,
+        },
       });
-      content = completion.choices[0]?.message?.content ?? '';
+      content = getGeminiText(response);
     } catch (err) {
-      throw new Error(`OpenAI API error: ${errorMessage(err)}`);
+      throw new Error(`Gemini API error: ${errorMessage(err)}`);
     }
 
-    if (!content.trim()) throw new Error('OpenAI returned empty response');
+    if (!content.trim()) throw new Error('Gemini returned empty response');
     return content;
   }
 

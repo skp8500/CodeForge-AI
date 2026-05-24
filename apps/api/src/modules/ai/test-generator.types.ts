@@ -10,11 +10,9 @@ export const GenerateTestsBodySchema = z.object({
 
 export type GenerateTestsBodyDto = z.infer<typeof GenerateTestsBodySchema>;
 
-// ─── OpenAI JSON schemas (strict-mode compatible) ──────────────────────────────
-//
-// Top-level must be an object — OpenAI strict mode forbids a bare array root.
+// ─── Gemini JSON schemas ──────────────────────────────────────────────────────
 
-export const TESTCASE_OPENAI_JSON_SCHEMA = {
+export const TESTCASE_JSON_SCHEMA = {
   type: 'object',
   properties: {
     testCases: {
@@ -35,7 +33,7 @@ export const TESTCASE_OPENAI_JSON_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-export const BRUTEFORCE_OPENAI_JSON_SCHEMA = {
+export const BRUTEFORCE_JSON_SCHEMA = {
   type: 'object',
   properties: {
     pythonCode: { type: 'string' },
@@ -45,7 +43,7 @@ export const BRUTEFORCE_OPENAI_JSON_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-// ─── Zod: raw OpenAI response validators ──────────────────────────────────────
+// ─── Zod: raw model response validators ──────────────────────────────────────
 
 export const RawTestCaseResponseSchema = z.object({
   testCases: z

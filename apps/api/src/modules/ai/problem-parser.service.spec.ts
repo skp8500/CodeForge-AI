@@ -1,5 +1,6 @@
 import { ParsingException } from './problem-parser.exception';
-import { ProblemParserService, OPENAI_CLIENT } from './problem-parser.service';
+import { GEMINI_CLIENT } from './gemini.client';
+import { ProblemParserService } from './problem-parser.service';
 import type { ParsedProblem } from './problem-parser.types';
 import { REDIS_TOKEN } from '../../redis/redis.module';
 
@@ -38,8 +39,8 @@ const VALID_PARSED_PROBLEM: ParsedProblem = {
   ambiguities: [],
 };
 
-// The raw OpenAI response shape (array constraints)
-const VALID_OPENAI_RESPONSE = JSON.stringify({
+// The raw Gemini response shape (array constraints)
+const VALID_GEMINI_RESPONSE = JSON.stringify({
   title: 'Maximum Subarray Sum',
   difficulty: 'medium',
   tags: ['dynamic-programming', 'arrays'],
@@ -60,17 +61,15 @@ const VALID_OPENAI_RESPONSE = JSON.stringify({
 });
 
 const LOW_CONFIDENCE_RESPONSE = JSON.stringify({
-  ...JSON.parse(VALID_OPENAI_RESPONSE),
+  ...JSON.parse(VALID_GEMINI_RESPONSE),
   confidenceScore: 0.6,
 });
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-const mockOpenAI = {
-  chat: {
-    completions: {
-      create: jest.fn(),
-    },
+const mockGemini = {
+  models: {
+    generateContent: jest.fn(),
   },
 };
 
@@ -82,12 +81,12 @@ const mockRedis = {
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
 function makeCompletion(content: string) {
-  return { choices: [{ message: { content } }] };
+  return { text: content };
 }
 
 function makeService(): ProblemParserService {
   return new ProblemParserService(
-    mockOpenAI as never,
+    mockGemini as never,
     mockRedis as never,
   );
 }
@@ -105,7 +104,7 @@ describe('ProblemParserService', () => {
   // ─── Cache hit ──────────────────────────────────────────────────────────────
 
   describe('cache hit', () => {
-    it('returns cached result without calling OpenAI', async () => {
+    it('returns cached result without calling Gemini', async () => {
       mockRedis.get.mockResolvedValue(JSON.stringify(VALID_PARSED_PROBLEM));
 
       const result = await service.parse(SAMPLE_RAW_TEXT);
@@ -113,7 +112,7 @@ describe('ProblemParserService', () => {
       expect(result.cached).toBe(true);
       expect(result.processingTimeMs).toBe(0);
       expect(result.parsed).toEqual(VALID_PARSED_PROBLEM);
-      expect(mockOpenAI.chat.completions.create).not.toHaveBeenCalled();
+      expect(mockGemini.models.generateContent).not.toHaveBeenCalled();
     });
 
     it('marks needsReview=false for cached result with high confidence', async () => {
@@ -139,16 +138,16 @@ describe('ProblemParserService', () => {
   describe('cache miss', () => {
     beforeEach(() => {
       mockRedis.get.mockResolvedValue(null);
-      mockOpenAI.chat.completions.create.mockResolvedValue(
-        makeCompletion(VALID_OPENAI_RESPONSE),
+      mockGemini.models.generateContent.mockResolvedValue(
+        makeCompletion(VALID_GEMINI_RESPONSE),
       );
       mockRedis.set.mockResolvedValue('OK');
     });
 
-    it('calls OpenAI and returns the parsed problem', async () => {
+    it('calls Gemini and returns the parsed problem', async () => {
       const result = await service.parse(SAMPLE_RAW_TEXT);
 
-      expect(mockOpenAI.chat.completions.create).toHaveBeenCalledTimes(1);
+      expect(mockGemini.models.generateContent).toHaveBeenCalledTimes(1);
       expect(result.parsed.title).toBe('Maximum Subarray Sum');
       expect(result.cached).toBeUndefined();
     });
@@ -177,7 +176,7 @@ describe('ProblemParserService', () => {
     });
 
     it('marks needsReview=true when confidenceScore < 0.75', async () => {
-      mockOpenAI.chat.completions.create.mockResolvedValue(
+      mockGemini.models.generateContent.mockResolvedValue(
         makeCompletion(LOW_CONFIDENCE_RESPONSE),
       );
 
@@ -190,10 +189,10 @@ describe('ProblemParserService', () => {
   // ─── Constraints transformation ─────────────────────────────────────────────
 
   describe('constraints transformation', () => {
-    it('converts the constraints array from OpenAI into a record', async () => {
+    it('converts the constraints array from Gemini into a record', async () => {
       mockRedis.get.mockResolvedValue(null);
-      mockOpenAI.chat.completions.create.mockResolvedValue(
-        makeCompletion(VALID_OPENAI_RESPONSE),
+      mockGemini.models.generateContent.mockResolvedValue(
+        makeCompletion(VALID_GEMINI_RESPONSE),
       );
       mockRedis.set.mockResolvedValue('OK');
 
@@ -215,35 +214,34 @@ describe('ProblemParserService', () => {
 
       // First call returns invalid JSON (missing required fields)
       const invalidResponse = JSON.stringify({ title: 'Only title' });
-      mockOpenAI.chat.completions.create
+      mockGemini.models.generateContent
         .mockResolvedValueOnce(makeCompletion(invalidResponse))
-        .mockResolvedValueOnce(makeCompletion(VALID_OPENAI_RESPONSE));
+        .mockResolvedValueOnce(makeCompletion(VALID_GEMINI_RESPONSE));
 
       const result = await service.parse(SAMPLE_RAW_TEXT);
 
-      expect(mockOpenAI.chat.completions.create).toHaveBeenCalledTimes(2);
+      expect(mockGemini.models.generateContent).toHaveBeenCalledTimes(2);
       expect(result.parsed.title).toBe('Maximum Subarray Sum');
 
       // Second call should include the retry suffix in the user message
-      const secondCallMessages = mockOpenAI.chat.completions.create.mock.calls[1][0].messages;
-      const userMessage = secondCallMessages.find((m: { role: string }) => m.role === 'user');
-      expect(userMessage.content).toContain('CRITICAL');
+      const secondCall = mockGemini.models.generateContent.mock.calls[1][0];
+      expect(secondCall.contents).toContain('CRITICAL');
     });
 
     it('throws ParsingException when both attempts fail', async () => {
       mockRedis.get.mockResolvedValue(null);
 
       const invalidResponse = JSON.stringify({ title: 'Only title' });
-      mockOpenAI.chat.completions.create.mockResolvedValue(makeCompletion(invalidResponse));
+      mockGemini.models.generateContent.mockResolvedValue(makeCompletion(invalidResponse));
 
       await expect(service.parse(SAMPLE_RAW_TEXT)).rejects.toThrow(ParsingException);
-      expect(mockOpenAI.chat.completions.create).toHaveBeenCalledTimes(2);
+      expect(mockGemini.models.generateContent).toHaveBeenCalledTimes(2);
     });
 
     it('does not cache when parsing ultimately fails', async () => {
       mockRedis.get.mockResolvedValue(null);
 
-      mockOpenAI.chat.completions.create.mockResolvedValue(
+      mockGemini.models.generateContent.mockResolvedValue(
         makeCompletion(JSON.stringify({ title: 'bad' })),
       );
 
@@ -252,42 +250,42 @@ describe('ProblemParserService', () => {
     });
   });
 
-  // ─── OpenAI error cases ─────────────────────────────────────────────────────
+  // ─── Gemini error cases ─────────────────────────────────────────────────────
 
-  describe('OpenAI error handling', () => {
+  describe('Gemini error handling', () => {
     beforeEach(() => {
       mockRedis.get.mockResolvedValue(null);
     });
 
-    it('throws ParsingException for empty OpenAI response', async () => {
-      mockOpenAI.chat.completions.create.mockResolvedValue(makeCompletion(''));
+    it('throws ParsingException for empty Gemini response', async () => {
+      mockGemini.models.generateContent.mockResolvedValue(makeCompletion(''));
 
       await expect(service.parse(SAMPLE_RAW_TEXT)).rejects.toThrow(ParsingException);
     });
 
-    it('throws ParsingException for whitespace-only OpenAI response', async () => {
-      mockOpenAI.chat.completions.create.mockResolvedValue(makeCompletion('   '));
+    it('throws ParsingException for whitespace-only Gemini response', async () => {
+      mockGemini.models.generateContent.mockResolvedValue(makeCompletion('   '));
 
       await expect(service.parse(SAMPLE_RAW_TEXT)).rejects.toThrow(ParsingException);
     });
 
-    it('throws ParsingException when OpenAI returns non-JSON text', async () => {
-      mockOpenAI.chat.completions.create.mockResolvedValue(
+    it('throws ParsingException when Gemini returns non-JSON text', async () => {
+      mockGemini.models.generateContent.mockResolvedValue(
         makeCompletion('Here is your answer: { broken json }'),
       );
 
       await expect(service.parse(SAMPLE_RAW_TEXT)).rejects.toThrow(ParsingException);
     });
 
-    it('throws ParsingException when OpenAI API call itself throws', async () => {
-      mockOpenAI.chat.completions.create.mockRejectedValue(new Error('rate limit exceeded'));
+    it('throws ParsingException when Gemini API call itself throws', async () => {
+      mockGemini.models.generateContent.mockRejectedValue(new Error('rate limit exceeded'));
 
       await expect(service.parse(SAMPLE_RAW_TEXT)).rejects.toThrow(ParsingException);
     });
 
     it('attaches rawResponse to ParsingException', async () => {
       const badContent = '{ "incomplete": true }';
-      mockOpenAI.chat.completions.create.mockResolvedValue(makeCompletion(badContent));
+      mockGemini.models.generateContent.mockResolvedValue(makeCompletion(badContent));
 
       try {
         await service.parse(SAMPLE_RAW_TEXT);
@@ -304,8 +302,8 @@ describe('ProblemParserService', () => {
   describe('cache key', () => {
     it('uses the same cache key for identical input', async () => {
       mockRedis.get.mockResolvedValue(null);
-      mockOpenAI.chat.completions.create.mockResolvedValue(
-        makeCompletion(VALID_OPENAI_RESPONSE),
+      mockGemini.models.generateContent.mockResolvedValue(
+        makeCompletion(VALID_GEMINI_RESPONSE),
       );
       mockRedis.set.mockResolvedValue('OK');
 
@@ -320,8 +318,8 @@ describe('ProblemParserService', () => {
 
     it('uses different cache keys for different input', async () => {
       mockRedis.get.mockResolvedValue(null);
-      mockOpenAI.chat.completions.create.mockResolvedValue(
-        makeCompletion(VALID_OPENAI_RESPONSE),
+      mockGemini.models.generateContent.mockResolvedValue(
+        makeCompletion(VALID_GEMINI_RESPONSE),
       );
       mockRedis.set.mockResolvedValue('OK');
 

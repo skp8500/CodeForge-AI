@@ -1,21 +1,20 @@
 import { createHash } from 'crypto';
 
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import type OpenAI from 'openai';
+import type { GoogleGenAI } from '@google/genai';
 import type IORedis from 'ioredis';
 
 import { REDIS_TOKEN } from '../../redis/redis.module';
+import { GEMINI_CLIENT, getGeminiModel, getGeminiText } from './gemini.client';
 import { ParsingException } from './problem-parser.exception';
 import {
   buildMessages,
-  OPENAI_JSON_SCHEMA,
+  PARSED_PROBLEM_JSON_SCHEMA,
   ParsedProblemSchema,
   RawParsedProblemSchema,
   type ParsedProblem,
   type ParseProblemResponse,
 } from './problem-parser.types';
-
-export const OPENAI_CLIENT = 'OPENAI_CLIENT';
 
 /** Redis key prefix; value is cached for 24 h */
 const CACHE_PREFIX = 'ai:parse:';
@@ -29,7 +28,7 @@ export class ProblemParserService {
   private readonly logger = new Logger(ProblemParserService.name);
 
   constructor(
-    @Inject(OPENAI_CLIENT) private readonly openai: OpenAI,
+    @Inject(GEMINI_CLIENT) private readonly gemini: GoogleGenAI,
     @Inject(REDIS_TOKEN) private readonly redis: IORedis,
   ) {}
 
@@ -52,8 +51,8 @@ export class ProblemParserService {
       };
     }
 
-    // ── Cache miss → call OpenAI ─────────────────────────────────────────────
-    this.logger.debug('Cache miss — calling OpenAI');
+    // ── Cache miss → call Gemini ─────────────────────────────────────────────
+    this.logger.debug('Cache miss — calling Gemini');
     const parsed = await this.parseWithRetry(rawText);
 
     await this.redis.set(cacheKey, JSON.stringify(parsed), 'EX', CACHE_TTL_SECONDS);
@@ -70,7 +69,7 @@ export class ProblemParserService {
   private async parseWithRetry(rawText: string): Promise<ParsedProblem> {
     // First attempt
     try {
-      return await this.callOpenAI(rawText, false);
+      return await this.callGemini(rawText, false);
     } catch (firstErr) {
       this.logger.warn(
         `First parse attempt failed (${errorMessage(firstErr)}). Retrying with stricter prompt.`,
@@ -79,7 +78,7 @@ export class ProblemParserService {
 
     // Single retry with the stricter user message suffix
     try {
-      return await this.callOpenAI(rawText, true);
+      return await this.callGemini(rawText, true);
     } catch (retryErr) {
       const raw = retryErr instanceof ParsingException ? retryErr.rawResponse : '';
       throw new ParsingException(
@@ -89,32 +88,28 @@ export class ProblemParserService {
     }
   }
 
-  private async callOpenAI(rawText: string, isRetry: boolean): Promise<ParsedProblem> {
+  private async callGemini(rawText: string, isRetry: boolean): Promise<ParsedProblem> {
     // ── 1. API call ──────────────────────────────────────────────────────────
     let rawContent: string;
 
     try {
-      const completion = await this.openai.chat.completions.create({
-        model: 'gpt-4o',
-        temperature: 0.1,
-        response_format: {
-          type: 'json_schema',
-          json_schema: {
-            name: 'ParsedProblem',
-            strict: true,
-            schema: OPENAI_JSON_SCHEMA,
-          },
+      const response = await this.gemini.models.generateContent({
+        model: getGeminiModel(),
+        contents: buildMessages(rawText, isRetry)[1]?.content ?? rawText,
+        config: {
+          temperature: 0.1,
+          responseMimeType: 'application/json',
+          responseJsonSchema: PARSED_PROBLEM_JSON_SCHEMA,
+          systemInstruction: buildMessages(rawText, isRetry)[0]?.content,
         },
-        messages: buildMessages(rawText, isRetry),
       });
-
-      rawContent = completion.choices[0]?.message?.content ?? '';
+      rawContent = getGeminiText(response);
     } catch (err) {
-      throw new ParsingException(`OpenAI API error: ${errorMessage(err)}`, '');
+      throw new ParsingException(`Gemini API error: ${errorMessage(err)}`, '');
     }
 
     if (!rawContent.trim()) {
-      throw new ParsingException('OpenAI returned an empty response', rawContent);
+      throw new ParsingException('Gemini returned an empty response', rawContent);
     }
 
     // ── 2. JSON parse ────────────────────────────────────────────────────────
@@ -122,7 +117,7 @@ export class ProblemParserService {
     try {
       rawJson = JSON.parse(rawContent);
     } catch {
-      throw new ParsingException('OpenAI response is not valid JSON', rawContent);
+      throw new ParsingException('Gemini response is not valid JSON', rawContent);
     }
 
     // ── 3. Validate raw shape (array constraints) ────────────────────────────

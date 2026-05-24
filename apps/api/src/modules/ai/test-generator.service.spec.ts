@@ -24,23 +24,17 @@ function makeRawTestCase(input: string, output = '1 2'): RawTestCase {
 }
 
 function makeCompletion(testCases: RawTestCase[]) {
-  return {
-    choices: [{ message: { content: JSON.stringify({ testCases }) } }],
-  };
+  return { text: JSON.stringify({ testCases }) };
 }
 
 function makeBruteForceCompletion(code: string) {
-  return {
-    choices: [
-      { message: { content: JSON.stringify({ pythonCode: code, explanation: 'brute force' }) } },
-    ],
-  };
+  return { text: JSON.stringify({ pythonCode: code, explanation: 'brute force' }) };
 }
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
-const mockOpenAI = {
-  chat: { completions: { create: jest.fn() } },
+const mockGemini = {
+  models: { generateContent: jest.fn() },
 };
 
 // Drizzle chain mock: db.select().from().where().limit()
@@ -63,7 +57,7 @@ const mockDb = {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeService(): TestGeneratorService {
-  return new TestGeneratorService(mockOpenAI as never, mockDb as never);
+  return new TestGeneratorService(mockGemini as never, mockDb as never);
 }
 
 const VALID_BRUTE_FORCE = `import sys
@@ -77,7 +71,7 @@ for i in range(n):
 
 // Default: 7 calls return valid data (6 categories + 1 brute-force)
 function setupHappyPath() {
-  mockOpenAI.chat.completions.create
+  mockGemini.models.generateContent
     // SAMPLE
     .mockResolvedValueOnce(
       makeCompletion([makeRawTestCase('2 3\n1 2'), makeRawTestCase('3 6\n1 2 3')]),
@@ -160,18 +154,18 @@ describe('TestGeneratorService', () => {
     });
   });
 
-  // ─── generateTests: 7 parallel OpenAI calls ────────────────────────────────
+  // ─── generateTests: 7 parallel Gemini calls ────────────────────────────────
 
-  describe('generateTests — parallel OpenAI calls', () => {
+  describe('generateTests — parallel Gemini calls', () => {
     beforeEach(() => {
       setupHappyPath();
       // Skip actual Python verification
       jest.spyOn(service as any, 'runWithPython').mockResolvedValue(null);
     });
 
-    it('makes exactly 7 OpenAI calls (6 categories + 1 brute-force)', async () => {
+    it('makes exactly 7 Gemini calls (6 categories + 1 brute-force)', async () => {
       await service.generateTests(PROBLEM_ID);
-      expect(mockOpenAI.chat.completions.create).toHaveBeenCalledTimes(7);
+      expect(mockGemini.models.generateContent).toHaveBeenCalledTimes(7);
     });
 
     it('returns generationTimeMs >= 0', async () => {
@@ -214,7 +208,7 @@ describe('TestGeneratorService', () => {
     it('removes duplicate inputs across categories before storing', async () => {
       // All 6 category calls return the same input
       const duplicateInput = '2 3\n1 2';
-      mockOpenAI.chat.completions.create
+      mockGemini.models.generateContent
         .mockResolvedValueOnce(makeCompletion([makeRawTestCase(duplicateInput)])) // sample
         .mockResolvedValueOnce(makeCompletion([makeRawTestCase(duplicateInput)])) // boundary
         .mockResolvedValueOnce(makeCompletion([makeRawTestCase(duplicateInput)])) // edge
@@ -320,8 +314,8 @@ describe('TestGeneratorService', () => {
     });
 
     it('does not call transaction when all categories return empty', async () => {
-      // All OpenAI calls return empty arrays (fail silently)
-      mockOpenAI.chat.completions.create.mockResolvedValue(
+      // All Gemini calls return empty arrays (fail silently)
+      mockGemini.models.generateContent.mockResolvedValue(
         makeCompletion([]), // min(1) fails → safeParse → empty array
       );
 
@@ -343,7 +337,7 @@ describe('TestGeneratorService', () => {
       mockSelectChain.limit.mockResolvedValue([]); // empty result
 
       await expect(service.generateTests(PROBLEM_ID)).rejects.toThrow(NotFoundException);
-      expect(mockOpenAI.chat.completions.create).not.toHaveBeenCalled();
+      expect(mockGemini.models.generateContent).not.toHaveBeenCalled();
     });
   });
 
@@ -351,7 +345,7 @@ describe('TestGeneratorService', () => {
 
   describe('resilience', () => {
     it('continues when some category calls fail, returning cases from successful ones', async () => {
-      mockOpenAI.chat.completions.create
+      mockGemini.models.generateContent
         .mockRejectedValueOnce(new Error('rate limit')) // sample fails
         .mockResolvedValueOnce(makeCompletion([makeRawTestCase('2 0\n-1 1')])) // boundary ok
         .mockRejectedValueOnce(new Error('timeout'))    // edge fails
@@ -389,10 +383,10 @@ describe('TestGeneratorService', () => {
       await service.generateTests(PROBLEM_ID);
 
       // The RANDOM call (4th category call) should include the seed in the user message
-      const randomCallArgs = mockOpenAI.chat.completions.create.mock.calls[3]?.[0] as {
-        messages: Array<{ role: string; content: string }>;
+      const randomCallArgs = mockGemini.models.generateContent.mock.calls[3]?.[0] as {
+        contents: string;
       };
-      const userMessage = randomCallArgs?.messages?.find((m) => m.role === 'user')?.content ?? '';
+      const userMessage = randomCallArgs?.contents ?? '';
       expect(userMessage).toMatch(/seed \d+/);
     });
 

@@ -34,7 +34,7 @@ export interface ReviewRequest {
   memoryKb?: number;
 }
 
-// ─── OpenAI JSON response schema ──────────────────────────────────────────────
+// ─── Structured JSON response schema ─────────────────────────────────────────
 
 export const AiReviewResultSchema = z.object({
   timeComplexity: z.string().max(50),

@@ -71,7 +71,7 @@ export interface FollowupBodyDto {
   conversationHistory: ConversationMessage[];
 }
 
-// ─── OpenAI hints response schema ─────────────────────────────────────────────
+// ─── Structured hints response schema ────────────────────────────────────────
 
 export const HintsResponseSchema = z.object({
   hints: z.array(z.string()).length(3),

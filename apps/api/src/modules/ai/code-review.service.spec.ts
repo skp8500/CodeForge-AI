@@ -5,10 +5,10 @@ import { Language, Verdict } from '@codeforge/shared';
 
 import { DB_TOKEN } from '../../database/database.module';
 import { REDIS_TOKEN } from '../../redis/redis.module';
-import { OPENAI_CLIENT } from './problem-parser.service';
 import { CodeReviewService } from './code-review.service';
 import { AI_REVIEW_QUEUE_TOKEN } from './code-review.types';
 import type { AiReviewResult } from './code-review.types';
+import { GEMINI_CLIENT } from './gemini.client';
 
 // ─── Fixed IDs ────────────────────────────────────────────────────────────────
 
@@ -76,14 +76,12 @@ function buildDbMock() {
   };
 }
 
-function buildOpenAIMock(result: Partial<AiReviewResult> = {}) {
+function buildGeminiMock(result: Partial<AiReviewResult> = {}) {
   return {
-    chat: {
-      completions: {
-        create: jest.fn().mockResolvedValue({
-          choices: [{ message: { content: JSON.stringify({ ...DEFAULT_AI_RESULT, ...result }) } }],
-        }),
-      },
+    models: {
+      generateContent: jest.fn().mockResolvedValue({
+        text: JSON.stringify({ ...DEFAULT_AI_RESULT, ...result }),
+      }),
     },
   };
 }
@@ -94,13 +92,13 @@ describe('CodeReviewService', () => {
   let service: CodeReviewService;
   let db: ReturnType<typeof buildDbMock>;
   let redis: { publish: jest.Mock };
-  let openai: ReturnType<typeof buildOpenAIMock>;
+  let gemini: ReturnType<typeof buildGeminiMock>;
   let reviewQueue: { add: jest.Mock };
 
   beforeEach(async () => {
     db = buildDbMock();
     redis = { publish: jest.fn().mockResolvedValue(1) };
-    openai = buildOpenAIMock();
+    gemini = buildGeminiMock();
     reviewQueue = { add: jest.fn().mockResolvedValue({ id: 'job-1' }) };
 
     const module = await Test.createTestingModule({
@@ -108,7 +106,7 @@ describe('CodeReviewService', () => {
         CodeReviewService,
         { provide: DB_TOKEN, useValue: db },
         { provide: REDIS_TOKEN, useValue: redis },
-        { provide: OPENAI_CLIENT, useValue: openai },
+        { provide: GEMINI_CLIENT, useValue: gemini },
         { provide: AI_REVIEW_QUEUE_TOKEN, useValue: reviewQueue },
       ],
     }).compile();
@@ -119,7 +117,7 @@ describe('CodeReviewService', () => {
   // ─── generate() ─────────────────────────────────────────────────────────────
 
   describe('generate', () => {
-    it('processes an AC verdict: calls OpenAI, saves review, updates submission, publishes to Redis', async () => {
+    it('processes an AC verdict: calls Gemini, saves review, updates submission, publishes to Redis', async () => {
       const sub = {
         id: SUBMISSION_ID,
         code: 'int main() { return 0; }',
@@ -138,12 +136,13 @@ describe('CodeReviewService', () => {
 
       await service.generate(SUBMISSION_ID);
 
-      expect(openai.chat.completions.create).toHaveBeenCalledTimes(1);
-      expect(openai.chat.completions.create).toHaveBeenCalledWith(
+      expect(gemini.models.generateContent).toHaveBeenCalledTimes(1);
+      expect(gemini.models.generateContent).toHaveBeenCalledWith(
         expect.objectContaining({
-          model: 'gpt-4o',
-          temperature: 0.3,
-          max_tokens: 1500,
+          config: expect.objectContaining({
+            temperature: 0.3,
+            maxOutputTokens: 1500,
+          }),
         }),
       );
 
@@ -166,13 +165,13 @@ describe('CodeReviewService', () => {
         runtimeMs: null,
         memoryKb: null,
       };
-      openai = buildOpenAIMock({ dryRun: 'At step 2, x becomes 0 instead of 3.', optimizationHint: null });
+      gemini = buildGeminiMock({ dryRun: 'At step 2, x becomes 0 instead of 3.', optimizationHint: null });
       await Test.createTestingModule({
         providers: [
           CodeReviewService,
           { provide: DB_TOKEN, useValue: db },
           { provide: REDIS_TOKEN, useValue: redis },
-          { provide: OPENAI_CLIENT, useValue: openai },
+          { provide: GEMINI_CLIENT, useValue: gemini },
           { provide: AI_REVIEW_QUEUE_TOKEN, useValue: reviewQueue },
         ],
       }).compile().then((m) => { service = m.get(CodeReviewService); });
@@ -186,8 +185,8 @@ describe('CodeReviewService', () => {
 
       await service.generate(SUBMISSION_ID);
 
-      const promptArg = openai.chat.completions.create.mock.calls[0][0];
-      const userMsg = promptArg.messages.find((m: { role: string }) => m.role === 'user').content as string;
+      const promptArg = gemini.models.generateContent.mock.calls[0][0];
+      const userMsg = promptArg.contents as string;
       expect(userMsg).toContain('WRONG ANSWER');
       expect(userMsg).toContain(TEST_CASE_ROW.input);
       expect(userMsg).toContain(TEST_CASE_ROW.expectedOutput);
@@ -205,13 +204,13 @@ describe('CodeReviewService', () => {
         runtimeMs: 5000,
         memoryKb: null,
       };
-      openai = buildOpenAIMock({ optimizationHint: 'Use binary search instead.', dryRun: null });
+      gemini = buildGeminiMock({ optimizationHint: 'Use binary search instead.', dryRun: null });
       await Test.createTestingModule({
         providers: [
           CodeReviewService,
           { provide: DB_TOKEN, useValue: db },
           { provide: REDIS_TOKEN, useValue: redis },
-          { provide: OPENAI_CLIENT, useValue: openai },
+          { provide: GEMINI_CLIENT, useValue: gemini },
           { provide: AI_REVIEW_QUEUE_TOKEN, useValue: reviewQueue },
         ],
       }).compile().then((m) => { service = m.get(CodeReviewService); });
@@ -224,8 +223,8 @@ describe('CodeReviewService', () => {
 
       await service.generate(SUBMISSION_ID);
 
-      const promptArg = openai.chat.completions.create.mock.calls[0][0];
-      const userMsg = promptArg.messages.find((m: { role: string }) => m.role === 'user').content as string;
+      const promptArg = gemini.models.generateContent.mock.calls[0][0];
+      const userMsg = promptArg.contents as string;
       expect(userMsg).toContain('TIME LIMIT EXCEEDED');
       expect(userMsg).toContain('5000ms');
       expect(userMsg).toContain('1000ms');
@@ -236,7 +235,7 @@ describe('CodeReviewService', () => {
 
       await service.generate(SUBMISSION_ID);
 
-      expect(openai.chat.completions.create).not.toHaveBeenCalled();
+      expect(gemini.models.generateContent).not.toHaveBeenCalled();
       expect(db.insert).not.toHaveBeenCalled();
     });
 
@@ -248,7 +247,7 @@ describe('CodeReviewService', () => {
       await expect(service.generate(SUBMISSION_ID)).rejects.toThrow('no verdict');
     });
 
-    it('retries with isRetry=true when first OpenAI response fails schema validation', async () => {
+    it('retries with isRetry=true when first Gemini response fails schema validation', async () => {
       const sub = {
         id: SUBMISSION_ID,
         code: 'pass',
@@ -265,20 +264,19 @@ describe('CodeReviewService', () => {
         .mockResolvedValueOnce([PROBLEM_ROW]);
       db.returning.mockResolvedValueOnce([{ id: REVIEW_ID }]);
 
-      openai.chat.completions.create
-        .mockResolvedValueOnce({ choices: [{ message: { content: '{"bad": "schema"}' } }] }) // invalid
-        .mockResolvedValueOnce({ choices: [{ message: { content: JSON.stringify(DEFAULT_AI_RESULT) } }] }); // valid
+      gemini.models.generateContent
+        .mockResolvedValueOnce({ text: '{"bad": "schema"}' })
+        .mockResolvedValueOnce({ text: JSON.stringify(DEFAULT_AI_RESULT) });
 
       await service.generate(SUBMISSION_ID);
 
-      expect(openai.chat.completions.create).toHaveBeenCalledTimes(2);
-      // Second call should have retry suffix in system prompt
-      const retryCall = openai.chat.completions.create.mock.calls[1][0];
-      const systemMsg = retryCall.messages.find((m: { role: string }) => m.role === 'system').content as string;
+      expect(gemini.models.generateContent).toHaveBeenCalledTimes(2);
+      const retryCall = gemini.models.generateContent.mock.calls[1][0];
+      const systemMsg = retryCall.config.systemInstruction as string;
       expect(systemMsg).toContain('previous response did not match');
     });
 
-    it('throws after both OpenAI attempts fail schema validation', async () => {
+    it('throws after both Gemini attempts fail schema validation', async () => {
       const sub = {
         id: SUBMISSION_ID,
         code: 'pass',
@@ -294,9 +292,9 @@ describe('CodeReviewService', () => {
         .mockResolvedValueOnce([sub])
         .mockResolvedValueOnce([PROBLEM_ROW]);
 
-      openai.chat.completions.create
-        .mockResolvedValueOnce({ choices: [{ message: { content: '{"bad": "schema"}' } }] })
-        .mockResolvedValueOnce({ choices: [{ message: { content: 'not json at all' } }] });
+      gemini.models.generateContent
+        .mockResolvedValueOnce({ text: '{"bad": "schema"}' })
+        .mockResolvedValueOnce({ text: 'not json at all' });
 
       await expect(service.generate(SUBMISSION_ID)).rejects.toThrow();
       expect(db.insert).not.toHaveBeenCalled();

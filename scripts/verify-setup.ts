@@ -28,9 +28,9 @@ async function main() {
   await check('Environment: REDIS_URL', async () => {
     if (!process.env.REDIS_URL) throw new Error('REDIS_URL is not set');
   });
-  await check('Environment: OPENAI_API_KEY', async () => {
-    if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY === 'REPLACE_ME') {
-      throw new Error('OPENAI_API_KEY is not set');
+  await check('Environment: GEMINI_API_KEY', async () => {
+    if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'REPLACE_ME') {
+      throw new Error('GEMINI_API_KEY is not set');
     }
   });
   await check('Environment: JWT secrets', async () => {

@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import type { GoogleGenAI } from '@google/genai';
 import { and, eq } from 'drizzle-orm';
 import type { Queue } from 'bullmq';
-import type OpenAI from 'openai';
 import type IORedis from 'ioredis';
 
 import { aiReviews, submissions, problems, testCases } from '@codeforge/db';
@@ -11,7 +11,7 @@ import type { Language } from '@codeforge/shared';
 
 import { DB_TOKEN } from '../../database/database.module';
 import { REDIS_TOKEN } from '../../redis/redis.module';
-import { OPENAI_CLIENT } from './problem-parser.service';
+import { GEMINI_CLIENT, getGeminiModel, getGeminiText } from './gemini.client';
 import {
   AI_REVIEW_QUEUE_TOKEN,
   AiReviewResultSchema,
@@ -27,7 +27,7 @@ export class CodeReviewService {
   constructor(
     @Inject(DB_TOKEN) private readonly db: Db,
     @Inject(REDIS_TOKEN) private readonly redis: IORedis,
-    @Inject(OPENAI_CLIENT) private readonly openai: OpenAI,
+    @Inject(GEMINI_CLIENT) private readonly gemini: GoogleGenAI,
     @Inject(AI_REVIEW_QUEUE_TOKEN) private readonly reviewQueue: Queue,
   ) {}
 
@@ -203,40 +203,40 @@ export class CodeReviewService {
 
   private async callWithRetry(req: ReviewRequest): Promise<AiReviewResult> {
     try {
-      return await this.callOpenAI(req, false);
+      return await this.callGemini(req, false);
     } catch (err) {
       this.logger.warn(`First review attempt failed (${errorMessage(err)}). Retrying.`);
     }
-    return this.callOpenAI(req, true);
+    return this.callGemini(req, true);
   }
 
-  private async callOpenAI(req: ReviewRequest, isRetry: boolean): Promise<AiReviewResult> {
+  private async callGemini(req: ReviewRequest, isRetry: boolean): Promise<AiReviewResult> {
     const { systemPrompt, userPrompt } = buildPrompt(req, isRetry);
 
     let rawContent: string;
     try {
-      const completion = await this.openai.chat.completions.create({
-        model: 'gpt-4o',
-        temperature: 0.3,
-        max_tokens: 1500,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
+      const response = await this.gemini.models.generateContent({
+        model: getGeminiModel(),
+        contents: userPrompt,
+        config: {
+          temperature: 0.3,
+          maxOutputTokens: 1500,
+          responseMimeType: 'application/json',
+          systemInstruction: systemPrompt,
+        },
       });
-      rawContent = completion.choices[0]?.message?.content ?? '';
+      rawContent = getGeminiText(response);
     } catch (err) {
-      throw new Error(`OpenAI API error: ${errorMessage(err)}`);
+      throw new Error(`Gemini API error: ${errorMessage(err)}`);
     }
 
-    if (!rawContent.trim()) throw new Error('OpenAI returned empty response');
+    if (!rawContent.trim()) throw new Error('Gemini returned empty response');
 
     let rawJson: unknown;
     try {
       rawJson = JSON.parse(rawContent);
     } catch {
-      throw new Error(`OpenAI returned invalid JSON: ${rawContent.slice(0, 200)}`);
+      throw new Error(`Gemini returned invalid JSON: ${rawContent.slice(0, 200)}`);
     }
 
     const parsed = AiReviewResultSchema.safeParse(rawJson);

@@ -14,9 +14,10 @@ pnpm install
 ### 2. Set up environment
 cp .env.example .env
 # Edit .env and fill in:
-# - OPENAI_API_KEY (required — get from platform.openai.com)
+# - GEMINI_API_KEY (required — get from aistudio.google.com/apikey)
 # - SMTP credentials (get free account at mailtrap.io)
 # - Google/GitHub OAuth (optional — only needed for OAuth login)
+# - Cloudflare R2 credentials (optional — only needed for file uploads)
 
 ### 3. Start infrastructure
 make infra

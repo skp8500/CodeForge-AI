@@ -11,14 +11,13 @@ export const ParseProblemBodySchema = z.object({
 
 export type ParseProblemBodyDto = z.infer<typeof ParseProblemBodySchema>;
 
-// ─── OpenAI JSON Schema (strict-mode compatible) ───────────────────────────────
+// ─── Gemini JSON Schema ────────────────────────────────────────────────────────
 //
-// Constraints are modelled as an *array* of {variable, min, max, description}
-// objects rather than a free-form record. OpenAI strict mode forbids
-// additionalProperties with a sub-schema, so this avoids that limitation.
-// Post-processing converts the array to the record shape consumers expect.
+// Constraints are modelled as an array of {variable, min, max, description}
+// objects rather than a free-form record. Post-processing converts the array
+// to the record shape consumers expect.
 
-export const OPENAI_JSON_SCHEMA = {
+export const PARSED_PROBLEM_JSON_SCHEMA = {
   type: 'object',
   properties: {
     title: { type: 'string' },
@@ -80,7 +79,7 @@ export const OPENAI_JSON_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-// ─── Zod: raw OpenAI response (array constraints) ──────────────────────────────
+// ─── Zod: raw model response (array constraints) ──────────────────────────────
 
 const RawConstraintSchema = z.object({
   variable: z.string().min(1),
@@ -147,7 +146,7 @@ export interface ParseProblemResponse {
   cached?: boolean;
 }
 
-// ─── OpenAI prompts ────────────────────────────────────────────────────────────
+// ─── Gemini prompts ────────────────────────────────────────────────────────────
 
 export const SYSTEM_PROMPT = `You are an expert competitive programming problem analyst. You extract structured metadata from raw coding problem text.
 
